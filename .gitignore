@@ -1,0 +1,19 @@
+# 忽略環境變數檔案 (保護 Token 和 API Key)
+.env
+*.env
+groq.env
+
+# 忽略資料庫檔案 (保護使用者資料)
+*.db
+*.sqlite3
+water_exp.db
+
+# 忽略 Python 快取檔案和資料夾
+__pycache__/
+*.py[cod]
+*$py.class
+
+
+# 如果你有使用虛擬環境 (如 venv)，也應該忽略
+venv/
+env/
