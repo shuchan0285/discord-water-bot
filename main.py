@@ -3,6 +3,9 @@ import discord
 from discord.ext import commands
 import database
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class MyBot(commands.Bot):
     def __init__(self):

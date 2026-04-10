@@ -184,57 +184,6 @@ def get_participants_paged(limit: int, offset: int):
     results = c.fetchall()
     conn.close()
     return results
-# ==========================================
-# 貼文反應身分組系統 (功能 B)
-# ==========================================
-def add_reaction_role(message_id: int, emoji: str, role_id: int):
-    """
-    提供給 !roleReact add 指令使用。
-    將「哪則訊息」的「哪個表情符號」綁定「哪個身分組」存入資料庫。
-    """
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("INSERT OR REPLACE INTO reaction_roles (message_id, emoji, role_id) VALUES (?, ?, ?)", 
-              (str(message_id), str(emoji), str(role_id)))
-    conn.commit()
-    conn.close()
-
-def get_role_by_reaction(message_id: int, emoji: str) -> int:
-    """
-    當使用者點擊表情符號時，查詢該表情對應的身分組 ID。
-    回傳：身分組 ID (整數)，若找不到則回傳 None。
-    """
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("SELECT role_id FROM reaction_roles WHERE message_id = ? AND emoji = ?", 
-              (str(message_id), str(emoji)))
-    result = c.fetchone()
-    conn.close()
-    return int(result[0]) if result else None
-
-def get_all_roles_for_message(message_id: int):
-    """
-    查詢某一則訊息上綁定的「所有」身分組規則。
-    主要用於「二選一互斥邏輯」，藉此找出使用者需要被移除的其他身分組。
-    回傳格式：[(身分組ID, 表情符號), ...]
-    """
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("SELECT role_id, emoji FROM reaction_roles WHERE message_id = ?", (str(message_id),))
-    results = c.fetchall()
-    conn.close()
-    return results
-
-def reset_user_exp(user_id: int):
-    """
-    將指定使用者的總經驗值、連續打卡數 (Combo) 與最後打卡回合強制歸零。
-    """
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    # 將經驗值、combo、last_round 同步歸零
-    c.execute("UPDATE users SET total_exp = 0, combo = 0, last_round = 0 WHERE user_id = ?", (str(user_id),))
-    conn.commit()
-    conn.close()
 
 # ==========================================
 # 管理員控制系統 (功能 C)
