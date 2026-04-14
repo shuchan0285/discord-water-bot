@@ -4,6 +4,9 @@ from discord.ext import tasks, commands
 import datetime
 import database
 from constants import TITLE_DATA, ROLE_MAPPING
+import event_manager
+
+sys_event_manager = event_manager.EventManager()
 
 class WaterButtonView(discord.ui.View):
     def __init__(self):
@@ -19,7 +22,12 @@ class WaterButtonView(discord.ui.View):
             await interaction.response.send_message("⚠️ 這則是舊的通知，已經過期囉！請找最新的訊息打卡。", ephemeral=True)
             return
 
-        success, old_total, new_total, combo, bonus_exp, is_first_of_day = database.claim_exp(message_id, user_id)
+        # 先抽取事件，取得變動的 EXP
+        drawn_event = sys_event_manager.get_random_event()
+        event_exp = drawn_event["exp"] if drawn_event else 0
+
+        # 將 event_exp 傳入資料庫結算 (修改這裡的傳參)
+        success, old_total, new_total, combo, bonus_exp, is_first_of_day = database.claim_exp(message_id, user_id, event_exp)
         
         if not success:
             await interaction.response.send_message("❌ 你很皮喔，你已經打過卡了不是嘛！", ephemeral=True)
@@ -31,31 +39,28 @@ class WaterButtonView(discord.ui.View):
         title_info = TITLE_DATA.get(new_level)
         title = title_info["title"] if title_info else "未知領域"
 
-        # 組合基礎成功訊息
-        msg = f"✅ {interaction.user.mention} 打卡成功！獲得 10 EXP"
+        # ==========================================
+        # 重新設計的 UI 文字排版 (使用陣列收集每一行)
+        # ==========================================
+        lines = []
+        lines.append(f"✅ **{interaction.user.mention} 打卡成功！**")
         
-        # 判斷是否觸發自動抽籤
-        fortune_embed = None
-        if is_first_of_day:
-            fortune_cog = interaction.client.get_cog("Fortune")
-            if fortune_cog:
-                fortune_embed = fortune_cog.get_random_fortune_embed()
-                msg += "\n🔮 **今日初次修煉，仙人賜予你一支運勢籤：**"
-
-        # 若有觸發獎勵，則顯示額外經驗
+        # 1. 數值結算區塊 (使用 > 產生縮排視覺效果)
+        lines.append("> 💧 基礎修為：`+10 EXP`")
+        
+        if drawn_event:
+            lines.append(f"> {drawn_event['emoji']} **突發機緣**：{drawn_event['exp']:+d} EXP ({drawn_event['text']})")
+            
         if bonus_exp > 0:
-            msg += f" 🎁 **(觸發 5 Combo 獎勵，額外 +{bonus_exp} EXP!)**"
-            
-        msg += f" (目前等級: **Lv.{new_level}**)"
-        
-        # 加入 Combo 特效
-        if combo >= 2:
-            msg += f" 🔥 **Combo x{combo}!**"
+            lines.append(f"> 🎁 **連擊獎勵**：Combo x{combo}! `(+{bonus_exp} EXP)`")
+        elif combo >= 2:
+            lines.append(f"> 🔥 **連續打卡**：Combo x{combo}!")
 
-        # 判斷是否為第一次打卡或升級
+        lines.append(f"> 📊 **當前進度**：**Lv.{new_level}** (總修為: {new_total})")
+
+        # 2. 升級與稱號提示 (空一行後獨立顯示，給予視覺強調)
         if old_total == 0:
-            msg += f"\n🎉 **歡迎加入喝水行列！獲得稱號：【{title}】**"
-            
+            lines.append(f"\n🎉 **歡迎加入修煉！獲得稱號：【{title}】**")
             # 實作：發放等級 1 的身分組
             role_id = ROLE_MAPPING.get(new_level)
             if role_id:
@@ -67,8 +72,7 @@ class WaterButtonView(discord.ui.View):
                         print(f"⚠️ [警告] 權限不足，無法發放 {role.name} 身分組給 {interaction.user.display_name}")
                         
         elif new_level > old_level:
-            msg += f"\n🏆 **恭喜升級啦！獲得新稱號：【{title}】**"
-            
+            lines.append(f"\n🏆 **恭喜突破！獲得新稱號：【{title}】**")
             # 實作：移除舊身分組，發放新身分組
             old_role_id = ROLE_MAPPING.get(old_level)
             new_role_id = ROLE_MAPPING.get(new_level)
@@ -76,31 +80,35 @@ class WaterButtonView(discord.ui.View):
             roles_to_remove = []
             roles_to_add = []
             
-            # 取得舊身分組物件
             if old_role_id:
                 old_role = interaction.guild.get_role(old_role_id)
-                if old_role:
-                    roles_to_remove.append(old_role)
-                    
-            # 取得新身分組物件
+                if old_role: roles_to_remove.append(old_role)
             if new_role_id:
                 new_role = interaction.guild.get_role(new_role_id)
-                if new_role:
-                    roles_to_add.append(new_role)
+                if new_role: roles_to_add.append(new_role)
             
-            # 執行替換
             try:
-                if roles_to_remove:
-                    await interaction.user.remove_roles(*roles_to_remove)
-                if roles_to_add:
-                    await interaction.user.add_roles(*roles_to_add)
+                if roles_to_remove: await interaction.user.remove_roles(*roles_to_remove)
+                if roles_to_add: await interaction.user.add_roles(*roles_to_add)
             except discord.Forbidden:
                 print(f"⚠️ [警告] 權限不足，無法為 {interaction.user.display_name} 切換身分組")
+
+        # 3. 運勢籤詩提示 (空一行)
+        fortune_embed = None
+        if is_first_of_day:
+            fortune_cog = interaction.client.get_cog("Fortune")
+            if fortune_cog:
+                fortune_embed = fortune_cog.get_random_fortune_embed()
+                lines.append("\n🔮 *仙人看你今日初次修煉，特賜運勢籤一支：*")
+
+        # 將陣列組合成最終的字串
+        final_msg = "\n".join(lines)
         
+        # 4. 發送結果
         await interaction.response.send_message(
-            content=msg, 
+            content=final_msg, 
             embed=fortune_embed, 
-            delete_after=3600 
+            ephemeral=True 
         )
 
 class WaterReminder(commands.Cog):

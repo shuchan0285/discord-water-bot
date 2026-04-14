@@ -4,6 +4,7 @@ from discord.ext import commands
 from discord import app_commands
 import database
 import os
+from constants import ROLE_MAPPING
 
 class AdminCommands(commands.Cog):
     def __init__(self, bot):
@@ -86,9 +87,28 @@ class AdminCommands(commands.Cog):
         database.remove_user_data(member.id)
         await interaction.response.send_message(f"🗑️ 已徹底刪除 {member.display_name} 的所有經驗值與打卡紀錄。", ephemeral=True)
 
-    # ... 保留原本的 add_exp, set_exp, reset 指令 ...
+    # 6. 調整經驗值 (增加或扣除)
+    @admin_group.command(name="add_exp", description="給予或扣除使用者的經驗值")
+    @app_commands.describe(amount="要增加的經驗值 (輸入負數則為扣除)")
+    async def add_exp(self, interaction: discord.Interaction, member: discord.Member, amount: int):
+        old_exp, new_exp = database.modify_user_exp(member.id, amount, mode="add")
+        # 這裡會顯示增減幅度，例如 +50 或是 -30
+        await interaction.response.send_message(f"✅ 已將 {member.display_name} 的經驗值調整：{old_exp} -> **{new_exp}** (變動: {amount:+d})", ephemeral=True)
 
-    # 6. 測試歡迎訊息
+    @admin_group.command(name="set_exp", description="強制設定使用者的經驗值")
+    @app_commands.describe(amount="要設定的最終經驗值數值")
+    async def set_exp(self, interaction: discord.Interaction, member: discord.Member, amount: int):
+        if amount < 0:
+            amount = 0
+        old_exp, new_exp = database.modify_user_exp(member.id, amount, mode="set")
+        await interaction.response.send_message(f"✅ 已強制將 {member.display_name} 的經驗值設定為：**{new_exp}** (原為: {old_exp})", ephemeral=True)
+
+    @admin_group.command(name="reset", description="⚠️ 將使用者的經驗值、Combo 與回合數歸零 (不刪除打卡紀錄)")
+    async def reset(self, interaction: discord.Interaction, member: discord.Member):
+        database.reset_user_exp(member.id)
+        await interaction.response.send_message(f"♻️ 已將 {member.display_name} 的修為、連擊進度全部歸零。", ephemeral=True)
+
+    # 7. 測試歡迎訊息
     @admin_group.command(name="test_welcome", description="手動測試機器人加入伺服器時的仙人歡迎訊息")
     async def test_welcome(self, interaction: discord.Interaction):
         welcome_msg = (
@@ -106,7 +126,7 @@ class AdminCommands(commands.Cog):
         # 將訊息發送至當前頻道
         await interaction.channel.send(welcome_msg)
     
-    # 7. 自動批次建立稱號身分組並產生 Mapping
+    # 8. 自動批次建立稱號身分組並產生 Mapping
     @admin_group.command(name="create_roles", description="自動批次建立喝水修煉的 30 個稱號身分組並產生 Mapping")
     async def create_roles(self, interaction: discord.Interaction):
         # 你的稱號與顏色字典
@@ -188,7 +208,7 @@ class AdminCommands(commands.Cog):
         
         await interaction.followup.send(f"✅ 成功！建立了 {created_count} 個身分組。\n這裡為你自動產生了 `ROLE_MAPPING` 程式碼，請下載這個檔案並將內容貼回你的 `water_reminder.py`：", file=file, ephemeral=True)
 
-    # 8. 產生現有身分組的 Mapping 程式碼
+    # 9. 產生現有身分組的 Mapping 程式碼
     @admin_group.command(name="generate_mapping", description="從伺服器現有的身分組中，搜尋並產生 ROLE_MAPPING 程式碼")
     async def generate_mapping(self, interaction: discord.Interaction):
         # 這裡一樣放你的 30 個稱號字典 (只需用到 title)
@@ -255,7 +275,7 @@ class AdminCommands(commands.Cog):
             
         await interaction.response.send_message(msg, file=file, ephemeral=True)
 
-    # 9. 批次清理頻道訊息 (Purge)
+    # 10. 批次清理頻道訊息 (Purge)
     @admin_group.command(name="clear", description="🧹 快速清理頻道內的指定數量訊息")
     @app_commands.describe(amount="要往上刪除幾則訊息？ (預設 5，最多建議 100)")
     async def clear_messages(self, interaction: discord.Interaction, amount: int = 5):
@@ -275,7 +295,55 @@ class AdminCommands(commands.Cog):
         except discord.HTTPException as e:
             await interaction.followup.send(f"⚠️ 發生未預期的 API 錯誤：{e}", ephemeral=True)
 
+    # ==========================================
+    # 開發測試工具：重設今日打卡狀態
+    # ==========================================
+    @admin_group.command(name="reset_daily", description="🛠️ [測試用] 消除使用者的今日打卡紀錄，使其能再次觸發抽籤")
+    async def reset_daily(self, interaction: discord.Interaction, member: discord.Member):
+        database.reset_user_daily_status(member.id)
+        await interaction.response.send_message(f"✅ 已清空 {member.display_name} 的今日打卡狀態！他現在去按喝水，會再次觸發仙人賜籤。", ephemeral=True)
 
+    # ==========================================
+    # 開發測試工具：強制校準等級與身分組 (解決掉級不掉稱號的問題)
+    # ==========================================
+    @admin_group.command(name="sync_level", description="🛠️ [測試用] 根據當前實際經驗值，重新派發正確的等級稱號")
+    async def sync_level(self, interaction: discord.Interaction, member: discord.Member):
+        # 1. 取得資料庫中真實的總經驗值
+        data = database.get_user_full_data(member.id)
+        if not data:
+            await interaction.response.send_message("❌ 找不到該道友的資料。", ephemeral=True)
+            return
+
+        total_exp = data[0]
+        correct_level, _, _ = database.get_level_info(total_exp)
+        correct_role_id = ROLE_MAPPING.get(correct_level)
+
+        # 2. 找出該名使用者身上目前擁有的「所有修煉稱號」準備卸除
+        roles_to_remove = []
+        for role_id in ROLE_MAPPING.values():
+            if not role_id: continue
+            role = interaction.guild.get_role(role_id)
+            if role and role in member.roles:
+                roles_to_remove.append(role)
+
+        # 因為操作大量身分組可能需要一兩秒，先 defer 避免超時
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            # 3. 剝奪所有舊稱號
+            if roles_to_remove:
+                await member.remove_roles(*roles_to_remove)
+
+            # 4. 重新賦予符合當前經驗值的唯一正確稱號
+            if correct_role_id:
+                correct_role = interaction.guild.get_role(correct_role_id)
+                if correct_role:
+                    await member.add_roles(correct_role)
+
+            await interaction.followup.send(f"✅ 已將 {member.display_name} 的境界強制校準為 **Lv.{correct_level}**。多餘的稱號已全部剝奪。", ephemeral=True)
+            
+        except discord.Forbidden:
+            await interaction.followup.send("❌ 錯誤：機器人權限不足，無法變更身分組（請確認機器人的身分組層級高於要操作的稱號）。", ephemeral=True)
 
 
 async def setup(bot):

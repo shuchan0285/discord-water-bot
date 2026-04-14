@@ -74,7 +74,7 @@ def get_current_round() -> int:
     conn.close()
     return int(result[0]) if result else 0
 
-def claim_exp(message_id: int, user_id: int) -> tuple:
+def claim_exp(message_id: int, user_id: int, event_exp: int = 0) -> tuple:
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
 
@@ -113,13 +113,15 @@ def claim_exp(message_id: int, user_id: int) -> tuple:
         bonus_exp = 5 if (new_combo > 0 and new_combo % 5 == 0) else 0
         new_total = old_total + 10 + bonus_exp
         
-        # 🌟 修正：在這裡計算今日獲得的經驗量
-        gain_amount = 10 + bonus_exp
+        # 在這裡計算今日獲得的經驗量
+        gain_amount = 10 + bonus_exp + event_exp
+
+        new_total = max(0, old_total + gain_amount)
             
         c.execute("""
             UPDATE users 
             SET total_exp = ?, combo = ?, last_round = ?, last_claim_date = ?, 
-                daily_exp = daily_exp + ? 
+                daily_exp = max(0, daily_exp + ?) 
             WHERE user_id = ?
         """, (new_total, new_combo, current_round, today_str, gain_amount, str(user_id)))
     else:
@@ -129,8 +131,8 @@ def claim_exp(message_id: int, user_id: int) -> tuple:
         bonus_exp = 0
         is_first_of_day = True
         
-        # 🌟 修正：新手第一次固定獲得 10
-        gain_amount = 10 
+        # 新手第一次固定獲得 10
+        gain_amount = max(0, 10 + event_exp)
         
         # 新使用者初始化
         c.execute("""
@@ -271,3 +273,12 @@ def modify_user_exp(user_id: int, exp_amount: int, mode: str = "add") -> tuple:
     conn.commit()
     conn.close()
     return current_exp, new_exp
+
+def reset_user_daily_status(user_id: int):
+    """將指定使用者的最後打卡日期清空，使其能再次觸發『今日首次』與抽籤"""
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    # 將 last_claim_date 設為空字串，系統就會判定這是一個新的一天
+    c.execute("UPDATE users SET last_claim_date = '' WHERE user_id = ?", (str(user_id),))
+    conn.commit()
+    conn.close()
