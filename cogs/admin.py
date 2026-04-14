@@ -4,7 +4,8 @@ from discord.ext import commands
 from discord import app_commands
 import database
 import os
-from constants import ROLE_MAPPING
+# 引用常數檔案中的 TITLE_DATA 與 ROLE_MAPPING
+from constants import ROLE_MAPPING, TITLE_DATA
 
 class AdminCommands(commands.Cog):
     def __init__(self, bot):
@@ -16,6 +17,10 @@ class AdminCommands(commands.Cog):
         default_permissions=discord.Permissions(administrator=True)
     )
 
+    # ==========================================
+    # 用戶數據與資料庫管理
+    # ==========================================
+    
     # 1. 查水表 (查看使用者後台數據)
     @admin_group.command(name="check", description="查看指定使用者的後台詳細數據")
     async def check(self, interaction: discord.Interaction, member: discord.Member):
@@ -37,19 +42,60 @@ class AdminCommands(commands.Cog):
         )
         await interaction.response.send_message(msg, ephemeral=True)
 
-    # 2. 強制觸發打卡
+    # 2. 備份資料庫
+    @admin_group.command(name="backup_db", description="取得當前資料庫檔案備份")
+    async def backup_db(self, interaction: discord.Interaction):
+        db_path = database.DB_NAME # "water_exp.db"
+        if os.path.exists(db_path):
+            file = discord.File(db_path, filename=f"backup_{database.DB_NAME}")
+            await interaction.response.send_message("📁 這是目前的資料庫備份檔案：", file=file, ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ 找不到資料庫檔案。", ephemeral=True)
+
+    # 3. 徹底刪除使用者
+    @admin_group.command(name="remove_user", description="⚠️ 徹底刪除使用者的所有資料 (不可復原)")
+    async def remove_user(self, interaction: discord.Interaction, member: discord.Member):
+        database.remove_user_data(member.id)
+        await interaction.response.send_message(f"🗑️ 已徹底刪除 {member.display_name} 的所有經驗值與打卡紀錄。", ephemeral=True)
+
+    # 4. 調整經驗值 (增加或扣除)
+    @admin_group.command(name="add_exp", description="給予或扣除使用者的經驗值")
+    @app_commands.describe(amount="要增加的經驗值 (輸入負數則為扣除)")
+    async def add_exp(self, interaction: discord.Interaction, member: discord.Member, amount: int):
+        old_exp, new_exp = database.modify_user_exp(member.id, amount, mode="add")
+        await interaction.response.send_message(f"✅ 已將 {member.display_name} 的經驗值調整：{old_exp} -> **{new_exp}** (變動: {amount:+d})", ephemeral=True)
+
+    # 5. 強制設定經驗值
+    @admin_group.command(name="set_exp", description="強制設定使用者的經驗值")
+    @app_commands.describe(amount="要設定的最終經驗值數值")
+    async def set_exp(self, interaction: discord.Interaction, member: discord.Member, amount: int):
+        if amount < 0:
+            amount = 0
+        old_exp, new_exp = database.modify_user_exp(member.id, amount, mode="set")
+        await interaction.response.send_message(f"✅ 已強制將 {member.display_name} 的經驗值設定為：**{new_exp}** (原為: {old_exp})", ephemeral=True)
+
+    # 6. 重置使用者經驗與連擊
+    @admin_group.command(name="reset", description="⚠️ 將使用者的經驗值、Combo 與回合數歸零 (不刪除打卡紀錄)")
+    async def reset(self, interaction: discord.Interaction, member: discord.Member):
+        database.reset_user_exp(member.id)
+        await interaction.response.send_message(f"♻️ 已將 {member.display_name} 的修為、連擊進度全部歸零。", ephemeral=True)
+
+
+    # ==========================================
+    # 系統排程與訊息控制
+    # ==========================================
+
+    # 1. 強制觸發打卡通知
     @admin_group.command(name="trigger_water", description="立即發送一則喝水打卡通知")
     async def trigger_water(self, interaction: discord.Interaction):
-        # 尋找 WaterReminder 模組
         water_cog = self.bot.get_cog("WaterReminder")
         if water_cog:
-            # 呼叫原本寫好的 water_task 邏輯
             await water_cog.water_task()
             await interaction.response.send_message("✅ 已成功手動觸發喝水通知。", ephemeral=True)
         else:
             await interaction.response.send_message("❌ 找不到 WaterReminder 模組。", ephemeral=True)
 
-    # 3. 切換排程開關
+    # 2. 切換排程開關
     @admin_group.command(name="toggle_water", description="開啟或關閉自動喝水提醒排程")
     @app_commands.choices(action=[
         app_commands.Choice(name="啟動排程", value="start"),
@@ -71,115 +117,41 @@ class AdminCommands(commands.Cog):
             water_cog.water_task.cancel()
             await interaction.response.send_message("🛑 喝水排程已停止運作。", ephemeral=True)
 
-    # 4. 備份資料庫
-    @admin_group.command(name="backup_db", description="取得當前資料庫檔案備份")
-    async def backup_db(self, interaction: discord.Interaction):
-        db_path = database.DB_NAME # "water_exp.db"
-        if os.path.exists(db_path):
-            file = discord.File(db_path, filename=f"backup_{database.DB_NAME}")
-            await interaction.response.send_message("📁 這是目前的資料庫備份檔案：", file=file, ephemeral=True)
-        else:
-            await interaction.response.send_message("❌ 找不到資料庫檔案。", ephemeral=True)
+    # 3. 批次清理頻道訊息 (Purge)
+    @admin_group.command(name="clear", description="快速清理頻道內的指定數量訊息")
+    @app_commands.describe(amount="要往上刪除幾則訊息？ (預設 5，最多建議 100)")
+    async def clear_messages(self, interaction: discord.Interaction, amount: int = 5):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            deleted = await interaction.channel.purge(limit=amount)
+            await interaction.followup.send(f"✅ 清理完畢！已成功刪除 {len(deleted)} 則訊息。", ephemeral=True)
+        except discord.Forbidden:
+            await interaction.followup.send("❌ 機器人權限不足，無法刪除訊息。", ephemeral=True)
+        except discord.HTTPException as e:
+            await interaction.followup.send(f"⚠️ 發生未預期的 API 錯誤：{e}", ephemeral=True)
 
-    # 5. 徹底刪除使用者
-    @admin_group.command(name="remove_user", description="⚠️ 徹底刪除使用者的所有資料 (不可復原)")
-    async def remove_user(self, interaction: discord.Interaction, member: discord.Member):
-        database.remove_user_data(member.id)
-        await interaction.response.send_message(f"🗑️ 已徹底刪除 {member.display_name} 的所有經驗值與打卡紀錄。", ephemeral=True)
 
-    # 6. 調整經驗值 (增加或扣除)
-    @admin_group.command(name="add_exp", description="給予或扣除使用者的經驗值")
-    @app_commands.describe(amount="要增加的經驗值 (輸入負數則為扣除)")
-    async def add_exp(self, interaction: discord.Interaction, member: discord.Member, amount: int):
-        old_exp, new_exp = database.modify_user_exp(member.id, amount, mode="add")
-        # 這裡會顯示增減幅度，例如 +50 或是 -30
-        await interaction.response.send_message(f"✅ 已將 {member.display_name} 的經驗值調整：{old_exp} -> **{new_exp}** (變動: {amount:+d})", ephemeral=True)
+    # ==========================================
+    # 伺服器身分組建置與管理
+    # ==========================================
 
-    @admin_group.command(name="set_exp", description="強制設定使用者的經驗值")
-    @app_commands.describe(amount="要設定的最終經驗值數值")
-    async def set_exp(self, interaction: discord.Interaction, member: discord.Member, amount: int):
-        if amount < 0:
-            amount = 0
-        old_exp, new_exp = database.modify_user_exp(member.id, amount, mode="set")
-        await interaction.response.send_message(f"✅ 已強制將 {member.display_name} 的經驗值設定為：**{new_exp}** (原為: {old_exp})", ephemeral=True)
-
-    @admin_group.command(name="reset", description="⚠️ 將使用者的經驗值、Combo 與回合數歸零 (不刪除打卡紀錄)")
-    async def reset(self, interaction: discord.Interaction, member: discord.Member):
-        database.reset_user_exp(member.id)
-        await interaction.response.send_message(f"♻️ 已將 {member.display_name} 的修為、連擊進度全部歸零。", ephemeral=True)
-
-    # 7. 測試歡迎訊息
-    @admin_group.command(name="test_welcome", description="手動測試機器人加入伺服器時的仙人歡迎訊息")
-    async def test_welcome(self, interaction: discord.Interaction):
-        welcome_msg = (
-            "隨緣而來，隨心而止。諸位道友，本座乃「摸魚仙人」，今日得見此境，實屬仙緣。\n\n"
-            "此地枯燥，本座特來助各位「以水入道」，修煉真身。以下為本座之神通範疇：\n"
-            "🔹 **飲水修煉**：本座定時會降下「飲水敕令」，點擊🥤按鈕即可累積修為。\n"
-            "🔹 **查看修為**：輸入 `/rank` 可觀測自身的等級與修煉進度。\n"
-            "🔹 **眾生榜**：輸入 `/leaderboard` 可一覽此境中各方道友的修為排行。\n"
-            "🔹 **晨間讀報**：每日清晨，本座亦會請座下貓咪轉述凡間要聞，助各位掌握塵世動向。\n\n"
-            "願諸位勤加補水，莫讓靈根乾涸。善哉善哉。"
-        )
-        
-        # 先回覆 interaction，避免 Discord API 報錯
-        await interaction.response.send_message("✅ 正在發送仙人歡迎訊息...", ephemeral=True)
-        # 將訊息發送至當前頻道
-        await interaction.channel.send(welcome_msg)
-    
-    # 8. 自動批次建立稱號身分組並產生 Mapping
+    # 1. 自動批次建立稱號身分組並產生 Mapping
     @admin_group.command(name="create_roles", description="自動批次建立喝水修煉的 30 個稱號身分組並產生 Mapping")
     async def create_roles(self, interaction: discord.Interaction):
-        # 你的稱號與顏色字典
-        titles_data = {
-            1: {"title": "非術師・對乾渴無感的凡人", "color": "#bdc3c7"},
-            2: {"title": "窗・察覺水分流失的徵兆", "color": "#ecf0f1"},
-            3: {"title": "四級術師・初次感應到水的存在", "color": "#d5f5e3"},
-            4: {"title": "四級術師・水分子控制習得", "color": "#abebc6"},
-            5: {"title": "三級術師・瓶裝水的支配者", "color": "#82e0aa"},
-            6: {"title": "三級術師・掌握飲水節奏", "color": "#58d68d"},
-            7: {"title": "準二級術師・強化肉體的滋潤", "color": "#2ecc71"},
-            8: {"title": "二級術師・術式「液體填充」", "color": "#28b463"},
-            9: {"title": "二級術師・水之咒力常態化", "color": "#239b56"},
-            10: {"title": "準一級術師・邁向脫水的彼端", "color": "#1d8348"},
-            11: {"title": "一級術師・身體組織完全活化", "color": "#1abc9c"},
-            12: {"title": "一級術師・飲水流派「極之番」", "color": "#16a085"},
-            13: {"title": "黑閃・瞬間飲水的核心衝擊", "color": "#943126"},
-            14: {"title": "黑閃・連續飲水紀錄保持人", "color": "#cb4335"},
-            15: {"title": "咒胎・體內水分的二次進化", "color": "#e67e22"},
-            16: {"title": "特級咒靈・乾旱之災「漏瑚級」", "color": "#d35400"},
-            17: {"title": "特級咒靈・海洋之災「陀艮級」", "color": "#3498db"},
-            18: {"title": "特級術師・擁有推翻乾枯的力量", "color": "#2980b9"},
-            19: {"title": "特級術師・純愛之水的結合", "color": "#8e44ad"},
-            20: {"title": "反轉術式・瞬間修復乾裂嘴唇", "color": "#ffffff"},
-            21: {"title": "簡易領域・半圓半徑內的絕對飲水權", "color": "#f1c40f"},
-            22: {"title": "領域展開「水沒之檻」", "color": "#34495e"},
-            23: {"title": "落花之情・無情灌溉的防禦術", "color": "#f39c12"},
-            24: {"title": "天與咒縛・捨棄飲料換取的極致純水體", "color": "#7f8c8d"},
-            25: {"title": "羂索級・跨越千年的飲水計畫", "color": "#212f3c"},
-            26: {"title": "伏魔御廚子・斬斷一切渴求", "color": "#641e16"},
-            27: {"title": "無量空處・腦袋充滿水的極致喜悅", "color": "#5dade2"},
-            28: {"title": "虛式「茈」・吞噬所有液體的虛空", "color": "#6c3483"},
-            29: {"title": "天上天下・唯我獨尊的飲水神", "color": "#f4d03f"},
-            30: {"title": "詛咒之王・千年不渴的至高宿儺", "color": "#1b2631"}
-        }
-
         await interaction.response.send_message("⏳ 正在為伺服器批次建立身分組...", ephemeral=True)
         
         guild = interaction.guild
         created_count = 0
-        
-        # 準備用來裝產生出的 mapping 字串的 list
         mapping_lines = ["ROLE_MAPPING = {"]
         
-        for level, data in titles_data.items():
+        # 替換為直接讀取 constants 中的 TITLE_DATA
+        for level, data in TITLE_DATA.items():
             role_name = data["title"]
             hex_color = data["color"]
-            
             color_int = int(hex_color.lstrip('#'), 16)
             discord_color = discord.Color(color_int)
             
             try:
-                # 建立身分組並把回傳的 Role 物件存起來
                 new_role = await guild.create_role(
                     name=role_name, 
                     color=discord_color, 
@@ -188,8 +160,6 @@ class AdminCommands(commands.Cog):
                     reason=f"管理員批次建立喝水稱號"
                 )
                 created_count += 1
-                
-                # 將新身分組的 ID 加進 mapping 字典字串中
                 mapping_lines.append(f"    {level}: {new_role.id},  # {role_name}")
                 
             except discord.Forbidden:
@@ -201,60 +171,24 @@ class AdminCommands(commands.Cog):
         mapping_lines.append("}")
         final_mapping_string = "\n".join(mapping_lines)
         
-        # 因為字串可能很長，我們可以把它寫成一個文字檔傳送到頻道裡
         import io
         file_obj = io.BytesIO(final_mapping_string.encode('utf-8'))
         file = discord.File(file_obj, filename="role_mapping.py")
         
-        await interaction.followup.send(f"✅ 成功！建立了 {created_count} 個身分組。\n這裡為你自動產生了 `ROLE_MAPPING` 程式碼，請下載這個檔案並將內容貼回你的 `water_reminder.py`：", file=file, ephemeral=True)
+        await interaction.followup.send(f"✅ 成功！建立了 {created_count} 個身分組。\n這裡為你自動產生了 `ROLE_MAPPING` 程式碼，請下載這個檔案並將內容更新回你的 `constants.py`：", file=file, ephemeral=True)
 
-    # 9. 產生現有身分組的 Mapping 程式碼
+    # 2. 產生現有身分組的 Mapping 程式碼
     @admin_group.command(name="generate_mapping", description="從伺服器現有的身分組中，搜尋並產生 ROLE_MAPPING 程式碼")
     async def generate_mapping(self, interaction: discord.Interaction):
-        # 這裡一樣放你的 30 個稱號字典 (只需用到 title)
-        titles_data = {
-            1: {"title": "非術師・對乾渴無感的凡人", "color": "#bdc3c7"},
-            2: {"title": "窗・察覺水分流失的徵兆", "color": "#ecf0f1"},
-            3: {"title": "四級術師・初次感應到水的存在", "color": "#d5f5e3"},
-            4: {"title": "四級術師・水分子控制習得", "color": "#abebc6"},
-            5: {"title": "三級術師・瓶裝水的支配者", "color": "#82e0aa"},
-            6: {"title": "三級術師・掌握飲水節奏", "color": "#58d68d"},
-            7: {"title": "準二級術師・強化肉體的滋潤", "color": "#2ecc71"},
-            8: {"title": "二級術師・術式「液體填充」", "color": "#28b463"},
-            9: {"title": "二級術師・水之咒力常態化", "color": "#239b56"},
-            10: {"title": "準一級術師・邁向脫水的彼端", "color": "#1d8348"},
-            11: {"title": "一級術師・身體組織完全活化", "color": "#1abc9c"},
-            12: {"title": "一級術師・飲水流派「極之番」", "color": "#16a085"},
-            13: {"title": "黑閃・瞬間飲水的核心衝擊", "color": "#943126"},
-            14: {"title": "黑閃・連續飲水紀錄保持人", "color": "#cb4335"},
-            15: {"title": "咒胎・體內水分的二次進化", "color": "#e67e22"},
-            16: {"title": "特級咒靈・乾旱之災「漏瑚級」", "color": "#d35400"},
-            17: {"title": "特級咒靈・海洋之災「陀艮級」", "color": "#3498db"},
-            18: {"title": "特級術師・擁有推翻乾枯的力量", "color": "#2980b9"},
-            19: {"title": "特級術師・純愛之水的結合", "color": "#8e44ad"},
-            20: {"title": "反轉術式・瞬間修復乾裂嘴唇", "color": "#ffffff"},
-            21: {"title": "簡易領域・半圓半徑內的絕對飲水權", "color": "#f1c40f"},
-            22: {"title": "領域展開「水沒之檻」", "color": "#34495e"},
-            23: {"title": "落花之情・無情灌溉的防禦術", "color": "#f39c12"},
-            24: {"title": "天與咒縛・捨棄飲料換取的極致純水體", "color": "#7f8c8d"},
-            25: {"title": "羂索級・跨越千年的飲水計畫", "color": "#212f3c"},
-            26: {"title": "伏魔御廚子・斬斷一切渴求", "color": "#641e16"},
-            27: {"title": "無量空處・腦袋充滿水的極致喜悅", "color": "#5dade2"},
-            28: {"title": "虛式「茈」・吞噬所有液體的虛空", "color": "#6c3483"},
-            29: {"title": "天上天下・唯我獨尊的飲水神", "color": "#f4d03f"},
-            30: {"title": "詛咒之王・千年不渴的至高宿儺", "color": "#1b2631"}
-        }
-        
         guild = interaction.guild
         mapping_lines = ["ROLE_MAPPING = {"]
         found_count = 0
         missing_roles = []
 
-        # 巡覽伺服器上所有的身分組
-        for level, expected_name in titles_data.items():
-            # 使用 discord.utils.get 來尋找名稱相符的身分組
+        # 替換為直接讀取 constants 中的 TITLE_DATA
+        for level, data in TITLE_DATA.items():
+            expected_name = data["title"]  # 修正迴圈變數的取值錯誤
             role = discord.utils.get(guild.roles, name=expected_name)
-            
             if role:
                 mapping_lines.append(f"    {level}: {role.id},  # {expected_name}")
                 found_count += 1
@@ -275,40 +209,35 @@ class AdminCommands(commands.Cog):
             
         await interaction.response.send_message(msg, file=file, ephemeral=True)
 
-    # 10. 批次清理頻道訊息 (Purge)
-    @admin_group.command(name="clear", description="🧹 快速清理頻道內的指定數量訊息")
-    @app_commands.describe(amount="要往上刪除幾則訊息？ (預設 5，最多建議 100)")
-    async def clear_messages(self, interaction: discord.Interaction, amount: int = 5):
-        # 1. 為了避免刪除過程太久導致 API 逾時，先發送延遲回應 (Ephemeral 隱藏訊息)
-        await interaction.response.defer(ephemeral=True)
-        
-        try:
-            # 2. 執行批次刪除 (purge)
-            # limit=amount 代表抓取最新的 amount 筆訊息
-            deleted = await interaction.channel.purge(limit=amount)
-            
-            # 3. 回報刪除結果
-            await interaction.followup.send(f"✅ 清理完畢！已成功刪除 {len(deleted)} 則訊息。", ephemeral=True)
-            
-        except discord.Forbidden:
-            await interaction.followup.send("❌ 機器人權限不足，無法刪除訊息。", ephemeral=True)
-        except discord.HTTPException as e:
-            await interaction.followup.send(f"⚠️ 發生未預期的 API 錯誤：{e}", ephemeral=True)
 
     # ==========================================
-    # 開發測試工具：重設今日打卡狀態
+    # 開發測試與除錯工具
     # ==========================================
+
+    # 1. 測試仙人歡迎訊息
+    @admin_group.command(name="test_welcome", description="手動測試機器人加入伺服器時的仙人歡迎訊息")
+    async def test_welcome(self, interaction: discord.Interaction):
+        welcome_msg = (
+            "隨緣而來，隨心而止。諸位道友，本座乃「摸魚仙人」，今日得見此境，實屬仙緣。\n\n"
+            "此地枯燥，本座特來助各位「以水入道」，修煉真身。以下為本座之神通範疇：\n"
+            "🔹 **飲水修煉**：本座定時會降下「飲水敕令」，點擊🥤按鈕即可累積修為。\n"
+            "🔹 **查看修為**：輸入 `/rank` 可觀測自身的等級與修煉進度。\n"
+            "🔹 **眾生榜**：輸入 `/leaderboard` 可一覽此境中各方道友的修為排行。\n"
+            "🔹 **晨間讀報**：每日清晨，本座亦會請座下貓咪轉述凡間要聞，助各位掌握塵世動向。\n\n"
+            "願諸位勤加補水，莫讓靈根乾涸。善哉善哉。"
+        )
+        await interaction.response.send_message("✅ 正在發送仙人歡迎訊息...", ephemeral=True)
+        await interaction.channel.send(welcome_msg)
+    
+    # 2. 重設今日打卡狀態
     @admin_group.command(name="reset_daily", description="🛠️ [測試用] 消除使用者的今日打卡紀錄，使其能再次觸發抽籤")
     async def reset_daily(self, interaction: discord.Interaction, member: discord.Member):
         database.reset_user_daily_status(member.id)
         await interaction.response.send_message(f"✅ 已清空 {member.display_name} 的今日打卡狀態！他現在去按喝水，會再次觸發仙人賜籤。", ephemeral=True)
 
-    # ==========================================
-    # 開發測試工具：強制校準等級與身分組 (解決掉級不掉稱號的問題)
-    # ==========================================
+    # 3. 強制校準等級與身分組
     @admin_group.command(name="sync_level", description="🛠️ [測試用] 根據當前實際經驗值，重新派發正確的等級稱號")
     async def sync_level(self, interaction: discord.Interaction, member: discord.Member):
-        # 1. 取得資料庫中真實的總經驗值
         data = database.get_user_full_data(member.id)
         if not data:
             await interaction.response.send_message("❌ 找不到該道友的資料。", ephemeral=True)
@@ -318,7 +247,6 @@ class AdminCommands(commands.Cog):
         correct_level, _, _ = database.get_level_info(total_exp)
         correct_role_id = ROLE_MAPPING.get(correct_level)
 
-        # 2. 找出該名使用者身上目前擁有的「所有修煉稱號」準備卸除
         roles_to_remove = []
         for role_id in ROLE_MAPPING.values():
             if not role_id: continue
@@ -326,15 +254,12 @@ class AdminCommands(commands.Cog):
             if role and role in member.roles:
                 roles_to_remove.append(role)
 
-        # 因為操作大量身分組可能需要一兩秒，先 defer 避免超時
         await interaction.response.defer(ephemeral=True)
 
         try:
-            # 3. 剝奪所有舊稱號
             if roles_to_remove:
                 await member.remove_roles(*roles_to_remove)
 
-            # 4. 重新賦予符合當前經驗值的唯一正確稱號
             if correct_role_id:
                 correct_role = interaction.guild.get_role(correct_role_id)
                 if correct_role:
@@ -344,7 +269,6 @@ class AdminCommands(commands.Cog):
             
         except discord.Forbidden:
             await interaction.followup.send("❌ 錯誤：機器人權限不足，無法變更身分組（請確認機器人的身分組層級高於要操作的稱號）。", ephemeral=True)
-
 
 async def setup(bot):
     await bot.add_cog(AdminCommands(bot))
