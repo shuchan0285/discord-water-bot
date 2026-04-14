@@ -224,19 +224,20 @@ class AdminCommands(commands.Cog):
             "🔹 **查看修為**：輸入 `/rank` 可觀測自身的等級與修煉進度。\n"
             "🔹 **眾生榜**：輸入 `/leaderboard` 可一覽此境中各方道友的修為排行。\n"
             "🔹 **晨間讀報**：每日清晨，本座亦會請座下貓咪轉述凡間要聞，助各位掌握塵世動向。\n\n"
+            "🔹 **運勢籤**：每日午後，本座會隨機抽取道友，贈送一籤，預示未來運勢。\n\n"
             "願諸位勤加補水，莫讓靈根乾涸。善哉善哉。"
         )
         await interaction.response.send_message("✅ 正在發送仙人歡迎訊息...", ephemeral=True)
         await interaction.channel.send(welcome_msg)
     
     # 2. 重設今日打卡狀態
-    @admin_group.command(name="reset_daily", description="🛠️ [測試用] 消除使用者的今日打卡紀錄，使其能再次觸發抽籤")
+    @admin_group.command(name="reset_daily", description="消除使用者的今日打卡紀錄，使其能再次觸發抽籤")
     async def reset_daily(self, interaction: discord.Interaction, member: discord.Member):
         database.reset_user_daily_status(member.id)
-        await interaction.response.send_message(f"✅ 已清空 {member.display_name} 的今日打卡狀態！他現在去按喝水，會再次觸發仙人賜籤。", ephemeral=True)
+        await interaction.response.send_message(f"✅ 已清空 {member.display_name} 的今日打卡狀態！", ephemeral=True)
 
     # 3. 強制校準等級與身分組
-    @admin_group.command(name="sync_level", description="🛠️ [測試用] 根據當前實際經驗值，重新派發正確的等級稱號")
+    @admin_group.command(name="sync_level", description="根據當前實際經驗值，重新派發正確的等級稱號")
     async def sync_level(self, interaction: discord.Interaction, member: discord.Member):
         data = database.get_user_full_data(member.id)
         if not data:
@@ -268,7 +269,7 @@ class AdminCommands(commands.Cog):
             await interaction.followup.send(f"✅ 已將 {member.display_name} 的境界強制校準為 **Lv.{correct_level}**。多餘的稱號已全部剝奪。", ephemeral=True)
             
         except discord.Forbidden:
-            await interaction.followup.send("❌ 錯誤：機器人權限不足，無法變更身分組（請確認機器人的身分組層級高於要操作的稱號）。", ephemeral=True)
+            await interaction.followup.send("錯誤：機器人權限不足，無法變更身分組。", ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(AdminCommands(bot))

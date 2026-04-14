@@ -121,7 +121,8 @@ class WaterReminder(commands.Cog):
     def cog_unload(self):
         self.water_task.cancel()
 
-    tz = datetime.timezone(datetime.timedelta(hours=8))
+    # 設定觸發時間（每天 10:00 - 23:30，每半小時一次）
+    tz = datetime.timezone(datetime.timedelta(hours=10))
     trigger_times = []
     for h in range(10, 24):
         trigger_times.append(datetime.time(hour=h, minute=0, tzinfo=tz))
