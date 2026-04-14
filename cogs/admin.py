@@ -254,6 +254,29 @@ class AdminCommands(commands.Cog):
             msg += f"\n⚠️ 有 {len(missing_roles)} 個稱號找不到對應的身分組，已在檔案中標記為 None。"
             
         await interaction.response.send_message(msg, file=file, ephemeral=True)
+
+    # 9. 批次清理頻道訊息 (Purge)
+    @admin_group.command(name="clear", description="🧹 快速清理頻道內的指定數量訊息")
+    @app_commands.describe(amount="要往上刪除幾則訊息？ (預設 5，最多建議 100)")
+    async def clear_messages(self, interaction: discord.Interaction, amount: int = 5):
+        # 1. 為了避免刪除過程太久導致 API 逾時，先發送延遲回應 (Ephemeral 隱藏訊息)
+        await interaction.response.defer(ephemeral=True)
         
+        try:
+            # 2. 執行批次刪除 (purge)
+            # limit=amount 代表抓取最新的 amount 筆訊息
+            deleted = await interaction.channel.purge(limit=amount)
+            
+            # 3. 回報刪除結果
+            await interaction.followup.send(f"✅ 清理完畢！已成功刪除 {len(deleted)} 則訊息。", ephemeral=True)
+            
+        except discord.Forbidden:
+            await interaction.followup.send("❌ 機器人權限不足，無法刪除訊息。", ephemeral=True)
+        except discord.HTTPException as e:
+            await interaction.followup.send(f"⚠️ 發生未預期的 API 錯誤：{e}", ephemeral=True)
+
+
+
+
 async def setup(bot):
     await bot.add_cog(AdminCommands(bot))
