@@ -5,6 +5,9 @@ import datetime
 import database
 from constants import TITLE_DATA, ROLE_MAPPING
 import event_manager
+import json
+import random
+import os
 
 sys_event_manager = event_manager.EventManager()
 
@@ -107,19 +110,41 @@ class WaterButtonView(discord.ui.View):
         # 4. 發送結果
         await interaction.response.send_message(
             content=final_msg, 
-            embed=fortune_embed, 
-            ephemeral=True 
+            embed=fortune_embed
         )
 
 class WaterReminder(commands.Cog):
-    # 下方保持不變... (原封不動保留你的 __init__, water_task, test_water 等)
     def __init__(self, bot):
         self.bot = bot
         self.target_channel_id = 1491748943690993875 # ⚠️ 請填入你的頻道 ID
+        self.messages_data = []
+        self.load_messages()
         self.water_task.start()
 
     def cog_unload(self):
         self.water_task.cancel()
+
+    def load_messages(self):
+        file_path = "water_messages.json"
+        try:
+            if os.path.exists(file_path):
+                with open(file_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    # 確保讀取到的是列表，否則給予空列表
+                    self.messages_data = data.get("messages", [])
+                print(f"✅ 成功載入 {len(self.messages_data)} 筆喝水提醒文字。")
+            else:
+                print(f"❌ 找不到 {file_path} 檔案，將使用預設提醒文字。")
+        except json.JSONDecodeError as e:
+            print(f"❌ {file_path} 格式錯誤: {e}，將使用預設提醒文字。")
+        except Exception as e:
+            print(f"❌ 讀取 {file_path} 時發生未知錯誤: {e}")
+
+    def get_random_message(self) -> str:
+        # 實作回退機制 (Fallback)：如果 JSON 檔案不存在或為空，回傳預設字串
+        if not self.messages_data:
+            return "🥤 **喝水啦！** 該喝水啦！身體要渴死啦！"
+        return random.choice(self.messages_data)
 
     # 設定觸發時間（每天 10:00 - 23:30，每半小時一次）
     tz = datetime.timezone(datetime.timedelta(hours=10))
@@ -132,9 +157,10 @@ class WaterReminder(commands.Cog):
     async def water_task(self):
         channel = self.bot.get_channel(self.target_channel_id)
         if channel:
-            # 喝水提醒發送兩小時後自動刪除
+            msg_content = self.get_random_message()
+
             message = await channel.send(
-                "🥤 **喝水啦！** 該喝水啦！身體要渴死啦！", 
+                msg_content, 
                 view=WaterButtonView(),
                 delete_after=3600
             )
@@ -143,7 +169,8 @@ class WaterReminder(commands.Cog):
 
     @commands.command(name="test_water")
     async def test_water(self, ctx):
-        message = await ctx.send("[補]🥤 **喝水啦！** 該喝水啦！身體要渴死啦！", view=WaterButtonView())
+        msg_content = f"[補] {self.get_random_message()}"
+        message = await ctx.send(msg_content, view=WaterButtonView())
         database.set_active_water_message(message.id)
         await ctx.message.delete()
 
