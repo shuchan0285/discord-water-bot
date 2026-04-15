@@ -4,6 +4,7 @@ from discord import app_commands
 import database
 import datetime
 from constants import TITLE_DATA, ROLE_MAPPING
+import os
 
 # ==========================================
 # 專屬於 /rank 指令的按鈕面板
@@ -36,8 +37,9 @@ class ResetLevelView(discord.ui.View):
 class LevelSystem(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-
-        self.target_channel_id = 1491748943690993875 
+        default_id = os.getenv("DEFAULT_CHANNEL_ID")
+        channel_id_str = database.get_setting("target_channel_id", default=default_id)
+        self.target_channel_id = int(channel_id_str) if channel_id_str else 0
         self.daily_leaderboard_task.start()
 
     def cog_unload(self):
@@ -51,6 +53,9 @@ class LevelSystem(commands.Cog):
 
     @tasks.loop(time=trigger_time)
     async def daily_leaderboard_task(self):
+        current_id = database.get_setting("target_channel_id", default=os.getenv("DEFAULT_CHANNEL_ID"))
+        self.target_channel_id = int(current_id) if current_id else self.target_channel_id
+
         channel = self.bot.get_channel(self.target_channel_id)
         if not channel:
             print("排行榜任務找不到指定的頻道！")

@@ -282,3 +282,20 @@ def reset_user_daily_status(user_id: int):
     c.execute("UPDATE users SET last_claim_date = '' WHERE user_id = ?", (str(user_id),))
     conn.commit()
     conn.close()
+
+def set_setting(key: str, value: str):
+    """通用設定儲存功能"""
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("INSERT OR REPLACE INTO system_state (key, value) VALUES (?, ?)", (key, str(value)))
+    conn.commit()
+    conn.close()
+
+def get_setting(key: str, default=None):
+    """通用設定讀取功能"""
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT value FROM system_state WHERE key = ?", (key,))
+    result = c.fetchone()
+    conn.close()
+    return result[0] if result else default

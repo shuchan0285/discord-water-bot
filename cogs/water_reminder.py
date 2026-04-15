@@ -116,7 +116,9 @@ class WaterButtonView(discord.ui.View):
 class WaterReminder(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.target_channel_id = 1491748943690993875 # ⚠️ 請填入你的頻道 ID
+        default_id = os.getenv("DEFAULT_CHANNEL_ID")
+        channel_id_str = database.get_setting("target_channel_id", default=default_id)
+        self.target_channel_id = int(channel_id_str) if channel_id_str else 0
         self.messages_data = []
         self.load_messages()
         self.water_task.start()
@@ -155,6 +157,9 @@ class WaterReminder(commands.Cog):
 
     @tasks.loop(time=trigger_times)
     async def water_task(self):
+        current_id = database.get_setting("target_channel_id", default=os.getenv("DEFAULT_CHANNEL_ID"))
+        self.target_channel_id = int(current_id) if current_id else self.target_channel_id
+
         channel = self.bot.get_channel(self.target_channel_id)
         if channel:
             msg_content = self.get_random_message()

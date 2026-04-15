@@ -23,6 +23,21 @@ class AdminCommands(commands.Cog):
     
     # 1. 查水表 (查看使用者後台數據)
     @admin_group.command(name="check", description="查看指定使用者的後台詳細數據")
+    @app_commands.describe(channel="目標頻道 (若不填則使用當前頻道)")
+    async def set_channel(self, interaction: discord.Interaction, channel: discord.TextChannel = None):
+        target_channel = channel or interaction.channel
+        
+        # 將 ID 存入資料庫
+        database.set_setting("target_channel_id", str(target_channel.id))
+        
+        # 同步更新目前已載入模組中的變數 (避免等待下次重啟)
+        cogs_to_update = ["LevelSystem", "WaterReminder", "DailyNews"]
+        for cog_name in cogs_to_update:
+            cog = self.bot.get_cog(cog_name)
+            if cog:
+                cog.target_channel_id = target_channel.id
+                
+        await interaction.response.send_message(f"✅ 已將目標頻道切換至：{target_channel.mention}", ephemeral=True)
     async def check(self, interaction: discord.Interaction, member: discord.Member):
         data = database.get_user_full_data(member.id)
         if not data:
