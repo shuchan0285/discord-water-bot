@@ -23,8 +23,9 @@ def init_db():
         "last_round INTEGER DEFAULT 0",
         "last_claim_date TEXT",
         "daily_exp INTEGER DEFAULT 0",
-        "wake_time TEXT",   # 新增：起床時間
-        "sleep_time TEXT"   # 新增：睡覺時間
+        "wake_time TEXT",
+        "sleep_time TEXT",
+        "daily_fortune TEXT DEFAULT ''"
     ]
     for col in columns_to_add:
         try:
@@ -159,6 +160,8 @@ def claim_exp(message_id: int, user_id: int, event_exp: int = 0, event_text: str
             """, (new_total, new_combo, current_round, today_str, gain_amount, str(user_id)))
     else:
         # 新玩家初始邏輯
+        old_total = 0
+        bonus_exp = 0
         new_total = 10 + event_exp
         new_combo = 1
         is_first_of_day = True
@@ -346,3 +349,27 @@ def get_user_today_summary(user_id: int):
     result = c.fetchone()
     conn.close()
     return result # 回傳格式: (total_exp, combo, daily_exp, last_claim_date) 或 None
+
+def set_user_daily_fortune(user_id: int, fortune_type: str):
+    """將今日抽到的運勢或化解狀態存入資料庫"""
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("UPDATE users SET daily_fortune = ? WHERE user_id = ?", (fortune_type, str(user_id)))
+    conn.commit()
+    conn.close()
+
+def get_user_daily_fortune(user_id: int) -> str:
+    """取得使用者的今日運勢Buff (若已跨日則無效)"""
+    today_str = get_logical_date()
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT daily_fortune, last_claim_date FROM users WHERE user_id = ?", (str(user_id),))
+    result = c.fetchone()
+    conn.close()
+    
+    if result:
+        fortune, last_date = result
+        # 必須確保這支籤是「今天」抽的才算數
+        if last_date == today_str:
+            return fortune if fortune else ""
+    return ""

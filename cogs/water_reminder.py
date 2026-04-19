@@ -62,12 +62,16 @@ class WaterButtonView(discord.ui.View):
         if str(message_id) != active_id:
             await interaction.response.send_message("🙄這我都通知多久了你才來點...", ephemeral=True)
             return
+        
+        # 1. 先從資料庫取得今日運勢 Buff (若為今日第一次喝水，此處會回傳空字串)
+        daily_fortune_buff = database.get_user_daily_fortune(user_id)
 
-        # 先抽取事件，取得變動的 EXP
-        drawn_event = sys_event_manager.get_random_event()
+        # 2. 將 Buff 傳入機緣系統影響抽獎機率
+        drawn_event = sys_event_manager.get_random_event(daily_fortune_buff)
         event_exp = drawn_event["exp"] if drawn_event else 0
         event_text = drawn_event["text"] if drawn_event else ""
 
+        # 3. 結算經驗值
         success, old_total, new_total, combo, bonus_exp, is_first_of_day, is_staying_up = database.claim_exp(
             message_id, user_id, event_exp, event_text)
         
@@ -140,23 +144,53 @@ class WaterButtonView(discord.ui.View):
             except discord.Forbidden:
                 print(f"⚠️ [警告] 權限不足，無法為 {interaction.user.display_name} 切換身分組")
 
-        # 3. 運勢籤詩提示 (空一行)
+        # 4. 首日抽籤與綁架子邏輯
         fortune_embed = None
+        fortune_type = ""
+        
         if is_first_of_day:
             fortune_cog = interaction.client.get_cog("Fortune")
             if fortune_cog:
-                fortune_embed = fortune_cog.get_random_fortune_embed()
-                lines.append("\n🔮 *仙人看你今日初次修煉，特賜運勢籤一支：*")
+                # 接收修改後的 Tuple 回傳值
+                result = fortune_cog.get_random_fortune_embed()
+                if result[0]:
+                    fortune_embed, fortune_type = result
+                    lines.append("\n🔮 *仙人看你今日初次修煉，特賜運勢籤一支：*")
+                    # 將抽到的運勢寫入資料庫
+                    database.set_user_daily_fortune(user_id, fortune_type)
 
-        # 將陣列組合成最終的字串
         final_msg = "\n".join(lines)
         
-        # 4. 發送結果
+        # 5. 如果抽到凶，附上化解按鈕 UI；否則不附帶任何 View
+        view_to_send = TieRackView(user_id) if fortune_type == "凶" else discord.utils.MISSING
+        
         await interaction.response.send_message(
             content=final_msg, 
             embed=fortune_embed,
-            delete_after=3600
+            view=view_to_send
         )
+
+class TieRackView(discord.ui.View):
+    def __init__(self, author_id: int):
+        super().__init__(timeout=600)
+        self.author_id = author_id
+
+    @discord.ui.button(label="⛩️ 將凶籤綁在神木架上", style=discord.ButtonStyle.secondary, emoji="🎐")
+    async def tie_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("這是別人的厄運，當心引火上身！", ephemeral=True)
+            return
+
+        # 更新資料庫，將運勢狀態改為 "已化解"
+        database.set_user_daily_fortune(self.author_id, "已化解")
+
+        # 禁用按鈕並變更外觀
+        button.disabled = True
+        button.label = "⛩️ 厄運已隨風消散"
+        button.style = discord.ButtonStyle.success
+
+        await interaction.response.edit_message(view=self)
+        await interaction.followup.send("💨 一陣微風吹過，你將凶籤綁在神木架上，今日的厄運似乎消散了...", ephemeral=True)
 
 class WaterReminder(commands.Cog):
     def __init__(self, bot):

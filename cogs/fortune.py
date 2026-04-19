@@ -5,16 +5,50 @@ import json
 import random
 import os
 import asyncio
+import database
 
 # ==========================================
 # 建立專屬於抽籤的 UI 介面 (按鈕)
 # ==========================================
 class FortuneView(discord.ui.View):
-    def __init__(self, author_id: int, fortune_cog):
+    def __init__(self, author_id: int, fortune_cog, fortune_type: str):
         super().__init__(timeout=600)
         self.author_id = author_id
         self.fortune_cog = fortune_cog
+        self.fortune_type = fortune_type
         self.message = None
+        
+        # 如果抽到「凶」，動態加入「綁在架上」按鈕
+        if self.fortune_type == "凶":
+            self.add_tie_button()
+    def add_tie_button(self):
+        # 建立綁籤按鈕
+        btn = discord.ui.Button(
+            label="⛩️ 將凶籤綁在神木架上", 
+            style=discord.ButtonStyle.secondary, 
+            emoji="🎐",
+            custom_id="tie_fortune_btn"
+        )
+        btn.callback = self.tie_button_callback
+        self.add_item(btn)
+
+    async def tie_button_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❓這是別人的厄運，當心引火上身", ephemeral=True)
+            return
+
+        # 更新資料庫為「已化解」
+        database.set_user_daily_fortune(self.author_id, "已化解")
+
+        # 找到該按鈕並禁用
+        for item in self.children:
+            if getattr(item, "custom_id", None) == "tie_fortune_btn":
+                item.disabled = True
+                item.label = "⛩️ 厄運已隨風消散"
+                item.style = discord.ButtonStyle.success
+
+        await interaction.response.edit_message(view=self)
+        await interaction.followup.send("💨 一陣微風吹過，你將凶籤綁在神木架上，厄運似乎消散了...", ephemeral=True)
 
     @discord.ui.button(label="我不信！重抽！重抽！重抽！", style=discord.ButtonStyle.secondary, emoji="🫠")
     async def redraw_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -68,11 +102,17 @@ class FortuneView(discord.ui.View):
         # ==========================================
         # 🌟 階段三：抽出新籤並再次更新畫面
         # ==========================================
-        new_embed = self.fortune_cog.get_random_fortune_embed()
-        
-        if new_embed:
-            # 重新放入 embed，並把 view=self 放回去讓按鈕重新出現
-            await interaction.edit_original_response(content=None, embed=new_embed, view=self)
+        new_result = self.fortune_cog.get_random_fortune_embed()
+        if new_result[0]:
+            new_embed, new_type = new_result
+            
+            # 更新資料庫中的今日運勢
+            database.set_user_daily_fortune(self.author_id, new_type)
+            
+            # 重新實例化一個 View 以更新按鈕狀態 (如果是凶就加綁籤鈕，不是就移除)
+            new_view = FortuneView(self.author_id, self.fortune_cog, new_type)
+            await interaction.edit_original_response(content=None, embed=new_embed, view=new_view)
+            new_view.message = self.message
         else:
             await interaction.edit_original_response(content="🙄看吧，非得逆天改命。", embed=None, view=None)
 
@@ -117,7 +157,7 @@ class Fortune(commands.Cog):
 
     def get_random_fortune_embed(self):
         if not self.fortunes_data:
-            return None
+            return None, ""
             
         drawn_fortune = random.choice(self.fortunes_data)
         embed_color = self.get_color(drawn_fortune.get("type", ""))
@@ -139,7 +179,7 @@ class Fortune(commands.Cog):
         if "note" in drawn_fortune and drawn_fortune["note"]:
             embed.set_footer(text=f"仙人叮囑：{drawn_fortune['note']}")
 
-        return embed
+        return embed, drawn_fortune.get("type", "")
 
     @app_commands.command(name="omikuji", description="向摸魚仙人求取一支今日運勢籤")
     async def omikuji(self, interaction: discord.Interaction):
@@ -147,17 +187,18 @@ class Fortune(commands.Cog):
             await interaction.response.send_message("🫩摸魚仙人昨天喝太多，還有點酒醉，目前找不到籤筒", ephemeral=True)
             return
 
-        embed = self.get_random_fortune_embed()
+        embed, f_type = self.get_random_fortune_embed()
         
         if embed:
-            # 實例化帶有重抽按鈕的介面
-            view = FortuneView(interaction.user.id, self)
-            await interaction.response.send_message(embed=embed, view=view)
+            # 🌟 抽籤後立即同步到資料庫，影響後續的打卡機緣機率
+            database.set_user_daily_fortune(interaction.user.id, f_type)
             
-            # 將發送後的訊息物件儲存進 view 中，以便未來 timeout 時更新狀態
+            # 實例化帶有狀態判斷的 View
+            view = FortuneView(interaction.user.id, self, f_type)
+            await interaction.response.send_message(embed=embed, view=view)
             view.message = await interaction.original_response()
         else:
-            await interaction.response.send_message("🫩摸魚仙人昨天喝太多，好像把籤筒給丟啦", ephemeral=True)
+            await interaction.response.send_message("🫩摸魚仙人把籤筒弄丟啦", ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(Fortune(bot))
