@@ -7,26 +7,30 @@ DB_NAME = "water_exp.db"
 # 系統初始化
 # ==========================================
 def init_db():
-    """
-    初始化資料庫。在機器人啟動時執行，確保所有需要的資料表都存在。
-    - users: 儲存使用者的總經驗值 (EXP)。
-    - claims: 儲存喝水打卡紀錄，防止同一則通知重複按。
-    - reaction_roles: 儲存「訊息ID + 表情符號 = 身分組ID」的對應規則。
-    """
+
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, total_exp INTEGER DEFAULT 0)''')
     c.execute('''CREATE TABLE IF NOT EXISTS claims (message_id TEXT, user_id TEXT, PRIMARY KEY(message_id, user_id))''')
     c.execute('''CREATE TABLE IF NOT EXISTS reaction_roles (message_id TEXT, emoji TEXT, role_id TEXT, PRIMARY KEY(message_id, emoji))''')
     c.execute('''CREATE TABLE IF NOT EXISTS system_state (key TEXT PRIMARY KEY, value TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS daily_events 
+                 (user_id TEXT, event_name TEXT, exp_change INTEGER, timestamp TEXT)''')
     
-    try:
-        c.execute("ALTER TABLE users ADD COLUMN combo INTEGER DEFAULT 0")
-        c.execute("ALTER TABLE users ADD COLUMN last_round INTEGER DEFAULT 0")
-        c.execute("ALTER TABLE users ADD COLUMN last_claim_date TEXT")
-        c.execute("ALTER TABLE users ADD COLUMN daily_exp INTEGER DEFAULT 0")
-    except:
-        pass
+    # 改用陣列逐一檢查並新增欄位，確保資料庫升級順利
+    columns_to_add = [
+        "combo INTEGER DEFAULT 0",
+        "last_round INTEGER DEFAULT 0",
+        "last_claim_date TEXT",
+        "daily_exp INTEGER DEFAULT 0",
+        "wake_time TEXT",   # 新增：起床時間
+        "sleep_time TEXT"   # 新增：睡覺時間
+    ]
+    for col in columns_to_add:
+        try:
+            c.execute(f"ALTER TABLE users ADD COLUMN {col}")
+        except sqlite3.OperationalError:
+            pass # 欄位若已存在則忽略
 
     conn.commit()
     conn.close()
@@ -34,16 +38,24 @@ def init_db():
 # ==========================================
 # 喝水經驗值與等級系統 (功能 A)
 # ==========================================
+
+def get_logical_date() -> str:
+    """邏輯換日：凌晨 4 點前視為同一天"""
+    now = datetime.datetime.now()
+    if now.hour < 4:
+        return (now - datetime.timedelta(days=1)).date().isoformat()
+    return now.date().isoformat()
+
 def get_level_info(total_exp: int):
     """
-    等級演算法：將使用者的「總經驗值」換算成當前等級進度。
-    公式：每一級所需經驗值為 50 * 當前等級 + 50。
-    回傳：(當前等級, 這一級已累積的經驗值, 升到下一級所需的經驗值)
+    等級演算法：方案 B (二次方成長曲線)
+    公式：15 * (L^2) + 50 * L + 50
     """
     level = 1
     current_exp = total_exp
     while True:
-        req_exp = 50 * level + 50
+        # 採用二次方成長曲線，難度隨等級大幅提升
+        req_exp = 15 * (level ** 2) + 50 * level + 50
         if current_exp >= req_exp:
             current_exp -= req_exp
             level += 1
@@ -74,76 +86,91 @@ def get_current_round() -> int:
     conn.close()
     return int(result[0]) if result else 0
 
-def claim_exp(message_id: int, user_id: int, event_exp: int = 0) -> tuple:
+def claim_exp(message_id: int, user_id: int, event_exp: int = 0, event_text: str = "") -> tuple:
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
 
-    # 1. 檢查是否已經點擊過這則通知
+# 1. 檢查重複領取
     c.execute("SELECT 1 FROM claims WHERE message_id = ? AND user_id = ?", (str(message_id), str(user_id)))
     if c.fetchone():
         conn.close()
-        return False, 0, 0, 0, 0, False
+        return False, 0, 0, 0, 0, False, False
     
-    today_str = datetime.date.today().isoformat() 
+    today_str = get_logical_date() 
+    yesterday_str = (datetime.datetime.strptime(today_str, "%Y-%m-%d") - datetime.timedelta(days=1)).date().isoformat()
+    now_full_time = datetime.datetime.now().strftime("%H:%M:%S")
 
-    # 2. 紀錄本次點擊
-    c.execute("INSERT INTO claims (message_id, user_id) VALUES (?, ?)", (str(message_id), str(user_id)))
-    
-    # 3. 讀取舊資料
-    c.execute("SELECT total_exp, combo, last_round, last_claim_date FROM users WHERE user_id = ?", (str(user_id),))
+    def record_detail(u_id, name, val):
+        if val != 0:
+            c.execute("INSERT INTO daily_events (user_id, event_name, exp_change, timestamp) VALUES (?, ?, ?, ?)",
+                      (str(u_id), name, val, now_full_time))
+
+    # 2. 讀取數據 (含就寢時間 sleep_time)
+    c.execute("SELECT total_exp, combo, last_round, last_claim_date, sleep_time FROM users WHERE user_id = ?", (str(user_id),))
     result = c.fetchone()
 
     is_first_of_day = False
+    is_staying_up = False
     current_round = get_current_round()
     
-    if result:
-        old_total, old_combo, last_round, last_claim_date = result
-        
-        # 判定是否為今日第一次打卡
-        if last_claim_date != today_str:
-            is_first_of_day = True
+    # 紀錄基礎修為與隨機機緣
+    record_detail(user_id, "💧 基礎修為", 10)
+    if event_exp != 0:
+        record_detail(user_id, f"🎲 {event_text}", event_exp)
 
-        # 判斷 Combo 是否延續
-        if current_round == last_round + 1:
+    if result:
+        old_total, old_combo, last_round, last_claim_date, sleep_time = result
+        
+        # Combo 與首日判定邏輯 (起床免責 & 1小時內打卡不斷連)
+        if last_claim_date == today_str:
             new_combo = old_combo + 1
+            if sleep_time: # 已按睡覺卻又打卡 = 熬夜
+                is_staying_up = True
+        elif last_claim_date == yesterday_str:
+            new_combo = old_combo + 1
+            is_first_of_day = True
         else:
             new_combo = 1
+            is_first_of_day = True
             
-        # 結算本次經驗
+        # 計算並紀錄連擊獎勵
         bonus_exp = 5 if (new_combo > 0 and new_combo % 5 == 0) else 0
-        new_total = old_total + 10 + bonus_exp
-        
-        # 在這裡計算今日獲得的經驗量
-        gain_amount = 10 + bonus_exp + event_exp
+        if bonus_exp > 0:
+            record_detail(user_id, f"🔥 連擊獎勵 (Combo x{new_combo})", bonus_exp)
 
+        gain_amount = 10 + bonus_exp + event_exp
         new_total = max(0, old_total + gain_amount)
             
-        c.execute("""
-            UPDATE users 
-            SET total_exp = ?, combo = ?, last_round = ?, last_claim_date = ?, 
-                daily_exp = max(0, daily_exp + ?) 
-            WHERE user_id = ?
-        """, (new_total, new_combo, current_round, today_str, gain_amount, str(user_id)))
+        # 更新使用者狀態
+        if is_first_of_day:
+            c.execute("""
+                UPDATE users SET total_exp = ?, combo = ?, last_round = ?, last_claim_date = ?, 
+                daily_exp = max(0, daily_exp + ?), wake_time = ?, sleep_time = '' WHERE user_id = ?
+            """, (new_total, new_combo, current_round, today_str, gain_amount, now_full_time[:5], str(user_id)))
+        elif is_staying_up:
+            c.execute("""
+                UPDATE users SET total_exp = ?, combo = ?, last_round = ?, last_claim_date = ?, 
+                daily_exp = max(0, daily_exp + ?), sleep_time = '' WHERE user_id = ?
+            """, (new_total, new_combo, current_round, today_str, gain_amount, str(user_id)))
+        else:
+            c.execute("""
+                UPDATE users SET total_exp = ?, combo = ?, last_round = ?, last_claim_date = ?, 
+                daily_exp = max(0, daily_exp + ?) WHERE user_id = ?
+            """, (new_total, new_combo, current_round, today_str, gain_amount, str(user_id)))
     else:
-        old_total = 0
-        new_total = 10
+        # 新玩家初始邏輯
+        new_total = 10 + event_exp
         new_combo = 1
-        bonus_exp = 0
         is_first_of_day = True
-        
-        # 新手第一次固定獲得 10
-        gain_amount = max(0, 10 + event_exp)
-        
-        # 新使用者初始化
         c.execute("""
-            INSERT INTO users (user_id, total_exp, combo, last_round, last_claim_date, daily_exp) 
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (str(user_id), new_total, new_combo, current_round, today_str, gain_amount))
+            INSERT INTO users (user_id, total_exp, combo, last_round, last_claim_date, daily_exp, wake_time, sleep_time) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, '')
+        """, (str(user_id), new_total, new_combo, current_round, today_str, new_total, now_full_time[:5]))
         
+    c.execute("INSERT INTO claims (message_id, user_id) VALUES (?, ?)", (str(message_id), str(user_id)))
     conn.commit()
     conn.close()
-    
-    return True, old_total, new_total, new_combo, bonus_exp, is_first_of_day
+    return True, old_total, new_total, new_combo, bonus_exp, is_first_of_day, is_staying_up
 
 def get_user_total_exp(user_id: int) -> int:
     """
@@ -224,11 +251,21 @@ def get_daily_top_gainer():
     conn.close()
     return result # 回傳 (user_id, daily_exp) 或 None
 
+def get_today_events(user_id: int):
+    """取得使用者今日的經驗變動明細，包含事件名稱與經驗變化量"""
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT event_name, exp_change FROM daily_events WHERE user_id = ? ORDER BY timestamp DESC", (str(user_id),))
+    results = c.fetchall()
+    conn.close()
+    return results
+
 def reset_daily_exp():
-    """每日結算後清空所有人的今日經驗"""
+    """每日結算後清空所有人的今日經驗與明細"""
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("UPDATE users SET daily_exp = 0")
+    c.execute("DELETE FROM daily_events") # 🌟 清空明細
     conn.commit()
     conn.close()
 
@@ -299,3 +336,13 @@ def get_setting(key: str, default=None):
     result = c.fetchone()
     conn.close()
     return result[0] if result else default
+
+def get_user_today_summary(user_id: int):
+    """取得使用者的今日總結數據"""
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    # 撈取總經驗、Combo、今日經驗、最後打卡日期
+    c.execute("SELECT total_exp, combo, daily_exp, last_claim_date FROM users WHERE user_id = ?", (str(user_id),))
+    result = c.fetchone()
+    conn.close()
+    return result # 回傳格式: (total_exp, combo, daily_exp, last_claim_date) 或 None

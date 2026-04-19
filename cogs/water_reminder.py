@@ -11,6 +11,44 @@ import os
 
 sys_event_manager = event_manager.EventManager()
 
+class SleepButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="我要睡覺了", style=discord.ButtonStyle.blurple, emoji="🛏️", custom_id="sleep_btn")
+
+    async def callback(self, interaction: discord.Interaction):
+        user_id = interaction.user.id
+        now_time = datetime.datetime.now().strftime("%H:%M")
+        
+        import sqlite3
+        conn = sqlite3.connect(database.DB_NAME)
+        c = conn.cursor()
+        # 讀取使用者的數據
+        c.execute("SELECT wake_time, daily_exp, total_exp, combo FROM users WHERE user_id = ?", (str(user_id),))
+        result = c.fetchone()
+        
+        if not result:
+            await interaction.response.send_message("道友今日尚未引水入體，快去喝杯水再來歇息吧！", ephemeral=True)
+            conn.close()
+            return
+
+        wake_time, daily_exp, total_exp, combo = result
+        
+        # 更新睡覺時間
+        c.execute("UPDATE users SET sleep_time = ? WHERE user_id = ?", (now_time, str(user_id)))
+        conn.commit()
+        conn.close()
+
+        # 產生睡前總結報告
+        embed = discord.Embed(title="🌙 閉關就寢報告", color=0x2b2d31)
+        embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+        embed.add_field(name="出關 (起床)", value=f"`{wake_time}`" if wake_time else "`未知`", inline=True)
+        embed.add_field(name="閉關 (就寢)", value=f"`{now_time}`", inline=True)
+        embed.add_field(name="今日修行總結", value=f"今日修為增長：**{daily_exp}** EXP\n當前心法連段：**{combo}** Combo\n累積總合修為：**{total_exp}**", inline=False)
+        embed.set_footer(text="仙人祝你一夜好眠，明日莫忘繼續補水。")
+
+        # 讓這則總結只有自己看得到
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
 class WaterButtonView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -22,18 +60,19 @@ class WaterButtonView(discord.ui.View):
 
         active_id = database.get_active_water_message()
         if str(message_id) != active_id:
-            await interaction.response.send_message("⚠️ 這則是舊的通知，已經過期囉！請找最新的訊息打卡。", ephemeral=True)
+            await interaction.response.send_message("🙄這我都通知多久了你才來點...", ephemeral=True)
             return
 
         # 先抽取事件，取得變動的 EXP
         drawn_event = sys_event_manager.get_random_event()
         event_exp = drawn_event["exp"] if drawn_event else 0
+        event_text = drawn_event["text"] if drawn_event else ""
 
-        # 將 event_exp 傳入資料庫結算 (修改這裡的傳參)
-        success, old_total, new_total, combo, bonus_exp, is_first_of_day = database.claim_exp(message_id, user_id, event_exp)
+        success, old_total, new_total, combo, bonus_exp, is_first_of_day, is_staying_up = database.claim_exp(
+            message_id, user_id, event_exp, event_text)
         
         if not success:
-            await interaction.response.send_message("❌ 你很皮喔，你已經打過卡了不是嘛！", ephemeral=True)
+            await interaction.response.send_message("😒你很皮喔，你已經打過卡了不是嘛！", ephemeral=True)
             return
 
         # 🆕 計算舊等級與新等級來判斷是否升級
@@ -46,7 +85,12 @@ class WaterButtonView(discord.ui.View):
         # 重新設計的 UI 文字排版 (使用陣列收集每一行)
         # ==========================================
         lines = []
-        lines.append(f"✅ **{interaction.user.mention} 打卡成功！**")
+
+        # 🌟 熬夜彩蛋吐槽
+        if is_staying_up:
+            lines.append(f"❓❓❓**仙人眉頭一皺**：道友 {interaction.user.mention} 不是說要去歇息了？怎麼又爬起來熬夜修仙！\n*(你的就寢狀態已取消，請稍後睡前再按一次)*\n")
+        else:
+            lines.append(f"✅ **{interaction.user.mention} 打卡成功！**")
         
         # 1. 數值結算區塊 (使用 > 產生縮排視覺效果)
         lines.append("> 💧 基礎修為：`+10 EXP`")
@@ -110,7 +154,8 @@ class WaterButtonView(discord.ui.View):
         # 4. 發送結果
         await interaction.response.send_message(
             content=final_msg, 
-            embed=fortune_embed
+            embed=fortune_embed,
+            delete_after=3600
         )
 
 class WaterReminder(commands.Cog):
@@ -148,12 +193,14 @@ class WaterReminder(commands.Cog):
             return "🥤 **喝水啦！** 該喝水啦！身體要渴死啦！"
         return random.choice(self.messages_data)
 
-    # 設定觸發時間（每天 10:00 - 23:30，每半小時一次）
-    tz = datetime.timezone(datetime.timedelta(hours=10))
+    # 設定觸發時間（每天 10:00 - 隔天02:00，每半小時一次）
+    tz = datetime.timezone(datetime.timedelta(hours=8))
     trigger_times = []
-    for h in range(10, 24):
-        trigger_times.append(datetime.time(hour=h, minute=0, tzinfo=tz))
-        trigger_times.append(datetime.time(hour=h, minute=30, tzinfo=tz))
+    for h in range(10, 27):
+        actual_h = h % 24
+        trigger_times.append(datetime.time(hour=actual_h, minute=0, tzinfo=tz))
+        trigger_times.append(datetime.time(hour=actual_h, minute=30, tzinfo=tz))
+    trigger_times.pop()
 
     @tasks.loop(time=trigger_times)
     async def water_task(self):
@@ -163,21 +210,19 @@ class WaterReminder(commands.Cog):
         channel = self.bot.get_channel(self.target_channel_id)
         if channel:
             msg_content = self.get_random_message()
+            view = WaterButtonView()
+            current_hour = datetime.datetime.now().hour
+            if 0 <= current_hour <= 3:
+                # 動態加入睡覺按鈕
+                view.add_item(SleepButton())
 
             message = await channel.send(
                 msg_content, 
-                view=WaterButtonView(),
+                view=view,
                 delete_after=3600
             )
             database.set_active_water_message(message.id)
             print(f"[{datetime.datetime.now().strftime('%H:%M')}] 已發送最新通知：{message.id}")
-
-    @commands.command(name="test_water")
-    async def test_water(self, ctx):
-        msg_content = f"[補] {self.get_random_message()}"
-        message = await ctx.send(msg_content, view=WaterButtonView())
-        database.set_active_water_message(message.id)
-        await ctx.message.delete()
 
     @water_task.before_loop
     async def before_task(self):

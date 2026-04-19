@@ -7,31 +7,6 @@ from constants import TITLE_DATA, ROLE_MAPPING
 import os
 
 # ==========================================
-# 專屬於 /rank 指令的按鈕面板
-# ==========================================
-class ResetLevelView(discord.ui.View):
-    def __init__(self, author_id: int):
-        super().__init__(timeout=60)
-        self.author_id = author_id
-
-    @discord.ui.button(label="重設等級 (歸零)", style=discord.ButtonStyle.danger, emoji="⚠️")
-    async def reset_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.author_id:
-            await interaction.response.send_message("❌ 你只能重設你自己的等級！", ephemeral=True)
-            return
-        
-        database.reset_user_exp(interaction.user.id)
-        
-        for child in self.children:
-            child.disabled = True
-        
-        embed = interaction.message.embeds[0]
-        embed.description = "⚠️ **此帳號的等級與經驗值已成功歸零。**\n請重新開始你的喝水旅程！"
-        embed.color = 0xED4245
-        
-        await interaction.response.edit_message(embed=embed, view=self)
-
-# ==========================================
 # 等級與排行榜系統 (此為 Cog 類別)
 # ==========================================
 class LevelSystem(commands.Cog):
@@ -110,7 +85,6 @@ class LevelSystem(commands.Cog):
             
             leaderboard_text += f"{rank_icon} **Lv.{level}** {display_title} **{name}** (總經驗: {total_exp})\n"
 
-        # 🌟 這裡使用 += 就不會報錯了，因為前面已經有了仙人的開場白
         embed.description += leaderboard_text
         embed.set_footer(text="明日卯時，再行補水。")
         
@@ -146,11 +120,8 @@ class LevelSystem(commands.Cog):
             f"進度：`{progress_bar}`"
         )
         embed.description = description
-        
-        # 注意：你原本的程式碼中把按鈕面板註解掉了，我在此維持你的註解狀態
-        # view = ResetLevelView(author_id=user_id)
-        # await interaction.response.send_message(embed=embed, view=view, delete_after=10)
-        await interaction.response.send_message(embed=embed, delete_after=10)
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     # --- 2. 排行榜查詢指令 (包含分頁功能) ---
     @app_commands.command(name="leaderboard", description="查看所有參與喝水修煉的道友名單")
@@ -207,7 +178,83 @@ class LevelSystem(commands.Cog):
         embed.description = leaderboard_text
         embed.set_footer(text=f"第 {page} 頁 / 共 {total_pages} 頁 (總計 {total_users} 名道友)")
         
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed, delete_after=60)
 
+    # --- 3. 今日修煉總結指令 ---
+    @app_commands.command(name="today", description="查看今日修煉總結與機緣明細")
+    async def today_summary(self, interaction: discord.Interaction):
+        user_id = interaction.user.id
+        data = database.get_user_today_summary(user_id)
+        events = database.get_today_events(user_id) # 🌟 取得明細
+        
+        if not data:
+            await interaction.response.send_message("❌ 本日尚未有修煉紀錄。", ephemeral=True)
+            return
+            
+        total_exp, combo, daily_exp, _ = data
+        level, current_exp, req_exp = database.get_level_info(total_exp)
+        title = TITLE_DATA.get(level, {}).get("title", "未知領域")
+        
+        embed = discord.Embed(title="🍶 今日修煉瑣事錄", color=0x93A2B7)
+        embed.set_author(name=f"{interaction.user.display_name} 的修煉進度", icon_url=interaction.user.display_avatar.url)
+        
+        # 1. 數值概況
+        embed.add_field(name="✨ 今日累計修為", value=f"`{daily_exp} EXP`", inline=True)
+        embed.add_field(name="🔥 當前連擊", value=f"`{combo} Combo`", inline=True)
+        
+        # 2. 🌟 機緣明細區塊
+        if events:
+            basic_exp = 0
+            special_logs = {}
+
+            # 1. 整理與合併數據
+            for name, val in events:
+                # 攔截並加總基礎修為
+                if "基礎修為" in name:
+                    basic_exp += val
+                else:
+                    # 統計特殊機緣的次數與總結
+                    if name not in special_logs:
+                        special_logs[name] = {"count": 0, "total_val": 0}
+                    special_logs[name]["count"] += 1
+                    special_logs[name]["total_val"] += val
+
+            # 2. 組合顯示文字 (不使用 md code block，改用原生 markdown 縮排)
+            event_log = f"> 💧 **基礎修為總計**：`+{basic_exp} EXP`\n"
+
+            if special_logs:
+                event_log += "> \n> 🎲 **今日觸發機緣**：\n"
+                for name, data in special_logs.items():
+                    count = data["count"]
+                    total = data["total_val"]
+                    sign = "+" if total >= 0 else ""
+                    
+                    # 移除原先資料庫存入的 emoji 前綴 (可選，看你喜好，這裡假設你保留)
+                    # 如果觸發多次，顯示 xN 與總和
+                    if count > 1:
+                        event_log += f"> └ {name} `(x{count})` `[{sign}{total}]`\n"
+                    else:
+                        event_log += f"> └ {name} `[{sign}{total}]`\n"
+
+            # 如果明細太長，截斷它避免 Discord 報錯
+            if len(event_log) > 1024:
+                event_log = event_log[:1000] + "\n> ... (餘下略過)"
+                
+            embed.add_field(name="🔮 今日機緣明細", value=event_log, inline=False)
+        else:
+            embed.add_field(name="🔮 今日機緣明細", value="> 暫無紀錄", inline=False)
+
+        # 3. 境界進度 (保持原本的進度條)
+        blocks = 10
+        filled = int((current_exp / req_exp) * blocks)
+        progress_bar = ("■" * filled) + ("□" * (blocks - filled))
+        
+        embed.add_field(
+            name="📊 當前境界", 
+            value=f"**Lv.{level} 【{title}】**\n進度：`{progress_bar}` {current_exp}/{req_exp}", 
+            inline=False
+        )
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 async def setup(bot):
     await bot.add_cog(LevelSystem(bot))
