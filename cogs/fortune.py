@@ -17,14 +17,15 @@ class FortuneView(discord.ui.View):
         self.fortune_cog = fortune_cog
         self.fortune_type = fortune_type
         self.message = None
-        
-        # 如果抽到「凶」，動態加入「綁在架上」按鈕
+
+        # 🌟 核心規則：只有抽到「凶」時，才開放「綁籤化解」與「不信邪重抽」的權利
         if self.fortune_type == "凶":
             self.add_tie_button()
+            self.add_redraw_button()
+
     def add_tie_button(self):
-        # 建立綁籤按鈕
         btn = discord.ui.Button(
-            label="⛩️ 將凶籤綁在神木架上", 
+            label="將凶籤綁在神木架上", 
             style=discord.ButtonStyle.secondary, 
             emoji="🎐",
             custom_id="tie_fortune_btn"
@@ -32,34 +33,51 @@ class FortuneView(discord.ui.View):
         btn.callback = self.tie_button_callback
         self.add_item(btn)
 
+    def add_redraw_button(self):
+        btn = discord.ui.Button(
+            label="我不信！重抽！", 
+            style=discord.ButtonStyle.secondary, 
+            emoji="🫠",
+            custom_id="redraw_fortune_btn"
+        )
+        btn.callback = self.redraw_button_callback
+        self.add_item(btn)
+
     async def tie_button_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.author_id:
             await interaction.response.send_message("❓這是別人的厄運，當心引火上身", ephemeral=True)
             return
 
+        import database
         # 更新資料庫為「已化解」
         database.set_user_daily_fortune(self.author_id, "已化解")
 
-        # 找到該按鈕並禁用
+        # 🌟 防呆：點擊綁籤後，除了禁用綁籤按鈕，也要禁用重抽按鈕
         for item in self.children:
             if getattr(item, "custom_id", None) == "tie_fortune_btn":
                 item.disabled = True
-                item.label = "⛩️ 厄運已隨風消散"
+                item.label = "厄運已隨風消散"
                 item.style = discord.ButtonStyle.success
+            elif getattr(item, "custom_id", None) == "redraw_fortune_btn":
+                item.disabled = True # 不准化解完再重抽
 
         await interaction.response.edit_message(view=self)
-        await interaction.followup.send("💨 一陣微風吹過，你將凶籤綁在神木架上，厄運似乎消散了...", ephemeral=True)
+        
+        # 繼承你上一階段設定好的本地 GIF 圖片機制
+        file = discord.File("shrine.gif", filename="shrine.gif")
+        success_embed = discord.Embed(
+            description="💨 一陣微風吹過，你將凶籤綁在神木架上，今日的厄運似乎消散了...",
+            color=0x2ECC71
+        )
+        success_embed.set_image(url="attachment://shrine.gif")
 
-    @discord.ui.button(label="我不信！重抽！重抽！重抽！", style=discord.ButtonStyle.secondary, emoji="🫠")
-    async def redraw_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # 檢查：防止其他路人點擊你的重抽按鈕
+        await interaction.followup.send(embed=success_embed, file=file, ephemeral=True)
+
+    async def redraw_button_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.author_id:
             await interaction.response.send_message("❓這是別人的籤筒，你想幹嘛", ephemeral=True)
             return
 
-        # ==========================================
-        # 🌟 階段一：仙人的隨機嘲諷語錄庫（擴充版）
-        # ==========================================
         taunts = [
             "**摸魚仙人打了個哈欠：**\n「🙄呵，你不是想重抽，你只是想看到滿意的結果吧。」",
             "**摸魚仙人翻了個白眼：**\n「🙄凡人就是難伺候，抽到凶也是命，非要逆天改命嗎？」",
@@ -87,29 +105,24 @@ class FortuneView(discord.ui.View):
             "**摸魚仙人神情慵懶：**\n「🙄強扭的瓜不甜，強求的籤不靈。但既然你堅持，本座就隨便你吧。」"
         ]
         
-        # 隨機抽取一句嘲諷
         selected_taunt = random.choice(taunts)
         
         # 覆寫畫面，顯示嘲諷並隱藏原本的籤詩與按鈕
         await interaction.response.edit_message(content=selected_taunt, embed=None, view=None)
 
-        # ==========================================
-        # 🌟 階段二：等待演出時間
-        # ==========================================
-        # 讓畫面停留在嘲諷訊息 2.5 秒
+        # 等待演出時間
         await asyncio.sleep(2.5)
 
-        # ==========================================
-        # 🌟 階段三：抽出新籤並再次更新畫面
-        # ==========================================
+        # 抽出新籤並再次更新畫面
         new_result = self.fortune_cog.get_random_fortune_embed()
+        
         if new_result[0]:
             new_embed, new_type = new_result
             
-            # 更新資料庫中的今日運勢
+            import database
             database.set_user_daily_fortune(self.author_id, new_type)
             
-            # 重新實例化一個 View 以更新按鈕狀態 (如果是凶就加綁籤鈕，不是就移除)
+            # 🌟 重新產生 View：如果新抽到的籤不再是「凶」，就不會出現重抽與綁籤按鈕了
             new_view = FortuneView(self.author_id, self.fortune_cog, new_type)
             await interaction.edit_original_response(content=None, embed=new_embed, view=new_view)
             new_view.message = self.message

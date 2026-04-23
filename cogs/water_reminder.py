@@ -23,7 +23,7 @@ class SleepButton(discord.ui.Button):
         conn = sqlite3.connect(database.DB_NAME)
         c = conn.cursor()
         # 讀取使用者的數據
-        c.execute("SELECT wake_time, daily_exp, total_exp, combo FROM users WHERE user_id = ?", (str(user_id),))
+        c.execute("SELECT daily_exp, total_exp, combo FROM users WHERE user_id = ?", (str(user_id),))
         result = c.fetchone()
         
         if not result:
@@ -31,18 +31,14 @@ class SleepButton(discord.ui.Button):
             conn.close()
             return
 
-        wake_time, daily_exp, total_exp, combo = result
+        daily_exp, total_exp, combo = result
         
-        # 更新睡覺時間
-        c.execute("UPDATE users SET sleep_time = ? WHERE user_id = ?", (now_time, str(user_id)))
         conn.commit()
         conn.close()
 
         # 產生睡前總結報告
         embed = discord.Embed(title="🌙 閉關就寢報告", color=0x2b2d31)
         embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
-        embed.add_field(name="出關 (起床)", value=f"`{wake_time}`" if wake_time else "`未知`", inline=True)
-        embed.add_field(name="閉關 (就寢)", value=f"`{now_time}`", inline=True)
         embed.add_field(name="今日修行總結", value=f"今日修為增長：**{daily_exp}** EXP\n當前心法連段：**{combo}** Combo\n累積總合修為：**{total_exp}**", inline=False)
         embed.set_footer(text="仙人祝你一夜好眠，明日莫忘繼續補水。")
 
@@ -72,7 +68,7 @@ class WaterButtonView(discord.ui.View):
         event_text = drawn_event["text"] if drawn_event else ""
 
         # 3. 結算經驗值
-        success, old_total, new_total, combo, bonus_exp, is_first_of_day, is_staying_up = database.claim_exp(
+        success, old_total, new_total, combo, bonus_exp, is_first_of_day = database.claim_exp(
             message_id, user_id, event_exp, event_text)
         
         if not success:
@@ -89,12 +85,7 @@ class WaterButtonView(discord.ui.View):
         # 重新設計的 UI 文字排版 (使用陣列收集每一行)
         # ==========================================
         lines = []
-
-        # 🌟 熬夜彩蛋吐槽
-        if is_staying_up:
-            lines.append(f"❓❓❓**仙人眉頭一皺**：道友 {interaction.user.mention} 不是說要去歇息了？怎麼又爬起來熬夜修仙！\n*(你的就寢狀態已取消，請稍後睡前再按一次)*\n")
-        else:
-            lines.append(f"✅ **{interaction.user.mention} 打卡成功！**")
+        lines.append(f"✅ **{interaction.user.mention} 打卡成功！**")
         
         # 1. 數值結算區塊 (使用 > 產生縮排視覺效果)
         lines.append("> 💧 基礎修為：`+10 EXP`")
@@ -167,7 +158,8 @@ class WaterButtonView(discord.ui.View):
         await interaction.response.send_message(
             content=final_msg, 
             embed=fortune_embed,
-            view=view_to_send
+            view=view_to_send,
+            delete_after=3600
         )
 
 class TieRackView(discord.ui.View):
@@ -175,7 +167,7 @@ class TieRackView(discord.ui.View):
         super().__init__(timeout=600)
         self.author_id = author_id
 
-    @discord.ui.button(label="⛩️ 將凶籤綁在神木架上", style=discord.ButtonStyle.secondary, emoji="🎐")
+    @discord.ui.button(label="將凶籤綁在神木架上", style=discord.ButtonStyle.secondary, emoji="🎐")
     async def tie_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.author_id:
             await interaction.response.send_message("這是別人的厄運，當心引火上身！", ephemeral=True)
@@ -186,11 +178,19 @@ class TieRackView(discord.ui.View):
 
         # 禁用按鈕並變更外觀
         button.disabled = True
-        button.label = "⛩️ 厄運已隨風消散"
+        button.label = "厄運已隨風消散"
         button.style = discord.ButtonStyle.success
 
         await interaction.response.edit_message(view=self)
-        await interaction.followup.send("💨 一陣微風吹過，你將凶籤綁在神木架上，今日的厄運似乎消散了...", ephemeral=True)
+
+        file = discord.File("tenor.gif", filename="tenor.gif")
+        success_embed = discord.Embed(
+            description="💨 一陣微風吹過，你將凶籤綁在神木架上，今日的厄運似乎消散了...",
+            color=0x2ECC71
+        )
+    
+        success_embed.set_image(url="attachment://tenor.gif")
+        await interaction.followup.send(embed=success_embed, file=file, ephemeral=True)
 
 class WaterReminder(commands.Cog):
     def __init__(self, bot):
@@ -201,6 +201,7 @@ class WaterReminder(commands.Cog):
         self.messages_data = []
         self.load_messages()
         self.water_task.start()
+        self.consecutive_skips = 0
 
     def cog_unload(self):
         self.water_task.cancel()
@@ -230,7 +231,7 @@ class WaterReminder(commands.Cog):
     # 設定觸發時間（每天 10:00 - 隔天02:00，每半小時一次）
     tz = datetime.timezone(datetime.timedelta(hours=8))
     trigger_times = []
-    for h in range(10, 27):
+    for h in range(10, 29):
         actual_h = h % 24
         trigger_times.append(datetime.time(hour=actual_h, minute=0, tzinfo=tz))
         trigger_times.append(datetime.time(hour=actual_h, minute=30, tzinfo=tz))
@@ -240,8 +241,35 @@ class WaterReminder(commands.Cog):
     async def water_task(self):
         current_id = database.get_setting("target_channel_id", default=os.getenv("DEFAULT_CHANNEL_ID"))
         self.target_channel_id = int(current_id) if current_id else self.target_channel_id
-
         channel = self.bot.get_channel(self.target_channel_id)
+
+        # 1. 檢查上一則訊息是否有人點擊
+        if not database.check_last_message_claimed():
+            database.increment_missed_rounds()
+        else:
+            database.reset_missed_rounds()
+
+        missed = int(database.get_setting("consecutive_missed", 0))
+        now = datetime.datetime.now()
+
+        # 2. 判定是否觸發提早結束
+        should_stop = False
+        if now.hour >= 2 and missed >= 3:
+            should_stop = True
+        elif now.hour >= 0 and missed >= 5:
+            should_stop = True
+
+        if should_stop:
+            # 觸發結算並停止排程
+            level_cog = self.bot.get_cog("LevelSystem")
+            if level_cog:
+                await level_cog.daily_leaderboard_task() # 執行每日總結
+
+            database.reset_missed_rounds()
+            self.water_task.cancel() # 停止當前排程
+            print(f"[{now.strftime('%H:%M')}] 深夜無人回應，提前結束今日修煉。")
+            return
+        
         if channel:
             msg_content = self.get_random_message()
             view = WaterButtonView()
