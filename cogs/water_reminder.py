@@ -17,29 +17,23 @@ class SleepButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         user_id = interaction.user.id
-        now_time = datetime.datetime.now().strftime("%H:%M")
         
-        import sqlite3
-        conn = sqlite3.connect(database.DB_NAME)
-        c = conn.cursor()
-        # 讀取使用者的數據
-        c.execute("SELECT daily_exp, total_exp, combo FROM users WHERE user_id = ?", (str(user_id),))
-        result = c.fetchone()
+        data = database.get_user_today_summary(user_id)
         
-        if not result:
+        if not data:
             await interaction.response.send_message("道友今日尚未引水入體，快去喝杯水再來歇息吧！", ephemeral=True)
-            conn.close()
             return
 
-        daily_exp, total_exp, combo = result
+        total_exp, combo, daily_exp, _ = data
         
-        conn.commit()
-        conn.close()
-
         # 產生睡前總結報告
         embed = discord.Embed(title="🌙 閉關就寢報告", color=0x2b2d31)
         embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
-        embed.add_field(name="今日修行總結", value=f"今日修為增長：**{daily_exp}** EXP\n當前心法連段：**{combo}** Combo\n累積總合修為：**{total_exp}**", inline=False)
+        embed.add_field(
+            name="今日修行總結", 
+            value=f"今日修為增長：**{daily_exp}** EXP\n當前心法連段：**{combo}** Combo\n累積總合修為：**{total_exp}**", 
+            inline=False
+        )
         embed.set_footer(text="仙人祝你一夜好眠，明日莫忘繼續補水。")
 
         # 讓這則總結只有自己看得到
@@ -243,37 +237,49 @@ class WaterReminder(commands.Cog):
         self.target_channel_id = int(current_id) if current_id else self.target_channel_id
         channel = self.bot.get_channel(self.target_channel_id)
 
-        # 1. 檢查上一則訊息是否有人點擊
+        now = datetime.datetime.now()
+
+        # 1. 每天早上 10 點，強制解除睡眠模式並重置未讀計數
+        if now.hour == 10 and now.minute == 0:
+            database.set_setting("is_sleeping", "false")
+            database.reset_missed_rounds()
+
+        # 2. 檢查是否處於深夜提早結束的「睡眠模式」
+        if database.get_setting("is_sleeping", "false") == "true":
+            return
+
+        # 3. 檢查上一則訊息是否有人點擊
         if not database.check_last_message_claimed():
             database.increment_missed_rounds()
         else:
             database.reset_missed_rounds()
 
         missed = int(database.get_setting("consecutive_missed", 0))
-        now = datetime.datetime.now()
 
-        # 2. 判定是否觸發提早結束
+        # 4. 判定是否觸發提早結束 (嚴格限制在凌晨 0 點到 4 點之間)
         should_stop = False
-        if now.hour >= 2 and missed >= 3:
-            should_stop = True
-        elif now.hour >= 0 and missed >= 5:
-            should_stop = True
+        if 0 <= now.hour <= 4:
+            if now.hour >= 2 and missed >= 3:
+                should_stop = True
+            elif missed >= 5:
+                should_stop = True
 
         if should_stop:
-            # 觸發結算並停止排程
+            # 觸發結算並進入睡眠模式，取代原本的 cancel()
             level_cog = self.bot.get_cog("LevelSystem")
             if level_cog:
                 await level_cog.daily_leaderboard_task() # 執行每日總結
 
             database.reset_missed_rounds()
-            self.water_task.cancel() # 停止當前排程
-            print(f"[{now.strftime('%H:%M')}] 深夜無人回應，提前結束今日修煉。")
+            database.set_setting("is_sleeping", "true") # 標記為睡眠狀態
+            print(f"[{now.strftime('%H:%M')}] 深夜無人回應，提前結束今日修煉，進入睡眠模式。")
             return
         
+        # 5. 發送提醒訊息
         if channel:
             msg_content = self.get_random_message()
             view = WaterButtonView()
-            current_hour = datetime.datetime.now().hour
+            current_hour = now.hour
             if 0 <= current_hour <= 3:
                 # 動態加入睡覺按鈕
                 view.add_item(SleepButton())
@@ -284,11 +290,7 @@ class WaterReminder(commands.Cog):
                 delete_after=3600
             )
             database.set_active_water_message(message.id)
-            print(f"[{datetime.datetime.now().strftime('%H:%M')}] 已發送最新通知：{message.id}")
-
-    @water_task.before_loop
-    async def before_task(self):
-        await self.bot.wait_until_ready()
+            print(f"[{now.strftime('%H:%M')}] 已發送最新通知：{message.id}")
 
 async def setup(bot):
     await bot.add_cog(WaterReminder(bot))

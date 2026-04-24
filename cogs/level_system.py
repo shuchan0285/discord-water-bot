@@ -24,7 +24,7 @@ class LevelSystem(commands.Cog):
     # 定時任務：台灣時間每天 23:59 發送排行榜
     # ==========================================
     tz = datetime.timezone(datetime.timedelta(hours=8))
-    trigger_time = datetime.time(hour=23, minute=59, tzinfo=tz)
+    trigger_time = datetime.time(hour=4, minute=0, tzinfo=tz)
 
     @tasks.loop(time=trigger_time)
     async def daily_leaderboard_task(self):
