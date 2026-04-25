@@ -177,13 +177,13 @@ class TieRackView(discord.ui.View):
 
         await interaction.response.edit_message(view=self)
 
-        file = discord.File("tenor.gif", filename="tenor.gif")
+        file = discord.File("shrine.gif", filename="shrine.gif")
         success_embed = discord.Embed(
             description="💨 一陣微風吹過，你將凶籤綁在神木架上，今日的厄運似乎消散了...",
             color=0x2ECC71
         )
     
-        success_embed.set_image(url="attachment://tenor.gif")
+        success_embed.set_image(url="attachment://shrine.gif")
         await interaction.followup.send(embed=success_embed, file=file, ephemeral=True)
 
 class WaterReminder(commands.Cog):
