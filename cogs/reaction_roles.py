@@ -7,7 +7,7 @@ class RoleUI(commands.Cog):
         self.bot = bot
 
     ui_group = app_commands.Group(
-        name="role_ui", 
+        name="role_ui",
         description="UI 下拉選單身分組派發系統",
         default_permissions=discord.Permissions(manage_roles=True)
     )
@@ -21,24 +21,24 @@ class RoleUI(commands.Cog):
         role1="選項 1", role2="選項 2 (選填)", role3="選項 3 (選填)", role4="選項 4 (選填)", role5="選項 5 (選填)"
     )
     async def spawn_menu(
-        self, 
-        interaction: discord.Interaction, 
-        title: str, 
-        role1: discord.Role, 
-        role2: discord.Role = None, 
-        role3: discord.Role = None, 
-        role4: discord.Role = None, 
+        self,
+        interaction: discord.Interaction,
+        title: str,
+        role1: discord.Role,
+        role2: discord.Role = None,
+        role3: discord.Role = None,
+        role4: discord.Role = None,
         role5: discord.Role = None
     ):
         # 整理使用者傳入的角色清單，過濾掉未填寫的 None
         roles = [r for r in [role1, role2, role3, role4, role5] if r is not None]
-        
+
         # 建立選單選項
         options = []
         for role in roles:
             options.append(
                 discord.SelectOption(
-                    label=role.name, 
+                    label=role.name,
                     value=str(role.id), # 將 Role ID 作為選項的值
                     description=f"領取 {role.name} 身分組"
                 )
@@ -58,7 +58,7 @@ class RoleUI(commands.Cog):
         view = discord.ui.View(timeout=None)
         view.add_item(select)
 
-        embed = discord.Embed(title="🏷️ 身分組領取面板", description=title, color=0x2b2d31)
+        embed = discord.Embed(title="身分組領取面板", description=title, color=0x2b2d31)
         await interaction.response.send_message(embed=embed, view=view)
 
     # ==========================================
@@ -96,9 +96,9 @@ class RoleUI(commands.Cog):
         # 執行互斥邏輯判斷
         for r_id in all_menu_role_ids:
             role = guild.get_role(r_id)
-            if not role: 
+            if not role:
                 continue
-            
+
             if selected_role_id and r_id == selected_role_id:
                 if role not in member.roles:
                     roles_to_add.append(role)
@@ -115,14 +115,14 @@ class RoleUI(commands.Cog):
 
             # 回覆互動 (Ephemeral 僅自己可見)
             if selected_role_id:
-                await interaction.response.send_message(f"✅ 已為你裝備身分組：<@&{selected_role_id}>", ephemeral=True)
+                await interaction.response.send_message(f"已為你裝備身分組：<@&{selected_role_id}>", ephemeral=True)
             else:
-                await interaction.response.send_message("🗑️ 已成功卸下該面板的身分組。", ephemeral=True)
+                await interaction.response.send_message("已成功卸下該面板的身分組。", ephemeral=True)
 
         except discord.Forbidden:
-            await interaction.response.send_message("❌ 錯誤：機器人權限不足。請確保機器人的身分組位置高於你想派發的身分組。", ephemeral=True)
+            await interaction.response.send_message("錯誤：機器人權限不足。請確保機器人的身分組位置高於你想派發的身分組。", ephemeral=True)
         except Exception as e:
-            await interaction.response.send_message(f"⚠️ 發生未知的系統錯誤：{e}", ephemeral=True)
+            await interaction.response.send_message(f"發生未知的系統錯誤：{e}", ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(RoleUI(bot))

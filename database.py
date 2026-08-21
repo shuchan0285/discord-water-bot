@@ -16,7 +16,7 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS reaction_roles (message_id TEXT, emoji TEXT, role_id TEXT, PRIMARY KEY(message_id, emoji))''')
     c.execute('''CREATE TABLE IF NOT EXISTS system_state (key TEXT PRIMARY KEY, value TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS daily_events (user_id TEXT, event_name TEXT, exp_change INTEGER, timestamp TEXT)''')
-    
+
     columns_to_add = [
         "combo INTEGER DEFAULT 0",
         "last_round INTEGER DEFAULT 0",
@@ -28,7 +28,7 @@ def init_db():
         try:
             c.execute(f"ALTER TABLE users ADD COLUMN {col}")
         except sqlite3.OperationalError:
-            pass 
+            pass
 
     conn.commit()
     conn.close()
@@ -65,8 +65,8 @@ def claim_exp(message_id: int, user_id: int, event_exp: int = 0, event_text: str
     if c.fetchone():
         conn.close()
         return False, 0, 0, 0, 0, False
-    
-    today_str = get_logical_date() 
+
+    today_str = get_logical_date()
     yesterday_str = (datetime.datetime.strptime(today_str, "%Y-%m-%d") - datetime.timedelta(days=1)).date().isoformat()
     now_full_time = datetime.datetime.now().strftime("%H:%M:%S")
 
@@ -80,14 +80,14 @@ def claim_exp(message_id: int, user_id: int, event_exp: int = 0, event_text: str
 
     is_first_of_day = False
     current_round = get_current_round()
-    
-    record_detail(user_id, "💧 基礎修為", 10)
+
+    record_detail(user_id, "基礎修為", 10)
     if event_exp != 0:
-        record_detail(user_id, f"🎲 {event_text}", event_exp)
+        record_detail(user_id, event_text, event_exp)
 
     if result:
         old_total, old_combo, last_round, last_claim_date = result
-        
+
         # Combo 判定
         if last_claim_date == today_str:
             new_combo = old_combo + 1
@@ -97,16 +97,16 @@ def claim_exp(message_id: int, user_id: int, event_exp: int = 0, event_text: str
         else:
             new_combo = 1
             is_first_of_day = True
-            
+
         bonus_exp = 5 if (new_combo > 0 and new_combo % 5 == 0) else 0
         if bonus_exp > 0:
-            record_detail(user_id, f"🔥 連擊獎勵 (Combo x{new_combo})", bonus_exp)
+            record_detail(user_id, f"連擊獎勵 (Combo x{new_combo})", bonus_exp)
 
         gain_amount = 10 + bonus_exp + event_exp
         new_total = max(0, old_total + gain_amount)
-            
+
         c.execute("""
-            UPDATE users SET total_exp = ?, combo = ?, last_round = ?, last_claim_date = ?, 
+            UPDATE users SET total_exp = ?, combo = ?, last_round = ?, last_claim_date = ?,
             daily_exp = max(0, daily_exp + ?) WHERE user_id = ?
         """, (new_total, new_combo, current_round, today_str, gain_amount, str(user_id)))
     else:
@@ -117,10 +117,10 @@ def claim_exp(message_id: int, user_id: int, event_exp: int = 0, event_text: str
         new_combo = 1
         is_first_of_day = True
         c.execute("""
-            INSERT INTO users (user_id, total_exp, combo, last_round, last_claim_date, daily_exp) 
+            INSERT INTO users (user_id, total_exp, combo, last_round, last_claim_date, daily_exp)
             VALUES (?, ?, ?, ?, ?, ?)
         """, (str(user_id), new_total, new_combo, current_round, today_str, new_total))
-        
+
     c.execute("INSERT INTO claims (message_id, user_id) VALUES (?, ?)", (str(message_id), str(user_id)))
     conn.commit()
     conn.close()
@@ -181,7 +181,7 @@ def get_user_daily_fortune(user_id: int) -> str:
     c.execute("SELECT daily_fortune, last_claim_date FROM users WHERE user_id = ?", (str(user_id),))
     result = c.fetchone()
     conn.close()
-    
+
     if result:
         fortune, last_date = result
         if last_date == today_str:
@@ -214,13 +214,13 @@ def set_active_water_message(message_id: int):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("INSERT OR REPLACE INTO system_state (key, value) VALUES ('active_water_message', ?)", (str(message_id),))
-    
+
     c.execute("SELECT value FROM system_state WHERE key = 'current_round'")
     result = c.fetchone()
     current_round = int(result[0]) if result else 0
     current_round += 1
     c.execute("INSERT OR REPLACE INTO system_state (key, value) VALUES ('current_round', ?)", (str(current_round),))
-    
+
     conn.commit()
     conn.close()
 
@@ -273,16 +273,16 @@ def modify_user_exp(user_id: int, exp_amount: int, mode: str = "add") -> tuple:
     c.execute("SELECT total_exp FROM users WHERE user_id = ?", (str(user_id),))
     result = c.fetchone()
     current_exp = result[0] if result else 0
-    
+
     new_exp = exp_amount if mode == "set" else current_exp + exp_amount
     new_exp = max(0, new_exp) # 防止負數
-        
+
     if result:
         c.execute("UPDATE users SET total_exp = ? WHERE user_id = ?", (new_exp, str(user_id)))
     else:
-        c.execute("INSERT INTO users (user_id, total_exp, combo, last_round) VALUES (?, ?, 0, 0)", 
+        c.execute("INSERT INTO users (user_id, total_exp, combo, last_round) VALUES (?, ?, 0, 0)",
                   (str(user_id), new_exp))
-        
+
     conn.commit()
     conn.close()
     return current_exp, new_exp

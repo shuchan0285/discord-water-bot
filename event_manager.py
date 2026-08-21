@@ -14,9 +14,9 @@ class EventManager:
             if os.path.exists(file_path):
                 with open(file_path, "r", encoding="utf-8") as f:
                     self.events = json.load(f)
-                print(f"✅ 成功載入 {len(self.events)} 種隨機事件。")
+                print(f"成功載入 {len(self.events)} 種隨機事件。")
         except Exception as e:
-            print(f"❌ 讀取 events.json 失敗: {e}")
+            print(f"讀取 events.json 失敗: {e}")
 
     def get_random_event(self, fortune_buff=""):
         """
@@ -26,7 +26,7 @@ class EventManager:
         """
         if not self.events:
             return None
-            
+
         weights = []
         for e in self.events:
             base_w = e.get("weight", 1)
@@ -46,8 +46,8 @@ class EventManager:
             weights.append(base_w)
 
         drawn = random.choices(self.events, weights=weights, k=1)[0]
-        
+
         if drawn["id"] == "none":
             return None
-            
+
         return drawn

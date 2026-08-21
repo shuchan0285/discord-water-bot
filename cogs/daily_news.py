@@ -44,12 +44,12 @@ class DailyNews(commands.Cog):
     # ==========================================
     async def get_short_url(self, session, long_url):
         try:
-            # 🌟 修正：將長網址進行編碼，避免 Google News 網址內的 & 或 ? 破壞 API 請求
+            # 修正：將長網址進行編碼，避免 Google News 網址內的 & 或 ? 破壞 API 請求
             encoded_url = urllib.parse.quote(long_url, safe='')
             service_url = f"https://is.gd/create.php?format=simple&url={encoded_url}"
             async with session.get(service_url, timeout=5) as res:
                 result = (await res.text()).strip()
-                
+
                 if result.startswith("http"):
                     return result
                 return long_url
@@ -66,7 +66,7 @@ class DailyNews(commands.Cog):
     async def news_task(self):
         current_id = database.get_setting("target_channel_id", default=os.getenv("DEFAULT_CHANNEL_ID"))
         self.target_channel_id = int(current_id) if current_id else self.target_channel_id
-        
+
         channel = self.bot.get_channel(self.target_channel_id)
         if not channel:
             print("你要本仙人去哪播報新聞又不講清楚")
@@ -96,14 +96,14 @@ class DailyNews(commands.Cog):
                 title = item.find('title').text
                 link = item.find('link').text
                 pubDateRaw = item.find('pubDate').text
-                
+
                 dt = parsedate_to_datetime(pubDateRaw).astimezone(self.tz)
                 pubDate = dt.strftime("%m/%d %H:%M")
-                
+
                 # 這裡會取得穩定、正確的短網址
                 short_link = await self.get_short_url(session, link)
                 full_content = await self.fetch_web_content(session, link)
-                
+
                 news_data.append({
                     "id": i + 1,
                     "title": title,
@@ -147,7 +147,7 @@ class DailyNews(commands.Cog):
                 ],
                 "temperature": 0.5 #
             }
-            
+
             headers = {
                 "Authorization": f"Bearer {self.groq_api_key}",
                 "Content-Type": "application/json"
@@ -166,21 +166,21 @@ class DailyNews(commands.Cog):
                           "\n".join([f"[{d['date']}] {d['title']}\n{d['link']}" for d in news_data])
 
             # 4. 準備發送到 Discord 的內容
-            final_content = f"🔔 **凡間時辰：{now_str}**\n\n🍶 **仙人晨間碎念 | 凡間瑣事錄**\n\n{summary}"
+            final_content = f"**凡間時辰：{now_str}**\n\n**仙人晨間碎念 | 凡間瑣事錄**\n\n{summary}"
             if len(final_content) > 1950:
                 final_content = final_content[:1900] + "\n\n...（太長了，本仙寫到手痠，剩下的你們自己參悟）"
 
             # 5. 動態 Webhook 發送邏輯
             webhooks = await channel.webhooks()
             webhook = discord.utils.get(webhooks, name="仙人早報")
-            
+
             if not webhook:
                 webhook = await channel.create_webhook(name="仙人早報")
 
             await webhook.send(
                 content=final_content,
                 username="摸魚仙人 雲岫",
-                avatar_url="https://i.pinimg.com/736x/4d/8e/fa/4d8efa942d7d5ff2ed480eaf2627bace.jpg" 
+                avatar_url="https://i.pinimg.com/736x/4d/8e/fa/4d8efa942d7d5ff2ed480eaf2627bace.jpg"
             )
             print("本仙人要去休息了！")
 
