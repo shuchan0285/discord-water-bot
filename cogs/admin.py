@@ -21,8 +21,8 @@ class AdminCommands(commands.Cog):
     # 用戶數據與資料庫管理
     # ==========================================
 
-    # 1. 查水表 (查看使用者後台數據)
-    @admin_group.command(name="check", description="查看指定使用者的後台詳細數據")
+    # 1. 設定目標頻道 (喝水提醒 / 排行榜 / 新聞早報共用)
+    @admin_group.command(name="set_channel", description="設定喝水提醒、排行榜、新聞早報要發送的目標頻道")
     @app_commands.describe(channel="目標頻道 (若不填則使用當前頻道)")
     async def set_channel(self, interaction: discord.Interaction, channel: discord.TextChannel = None):
         target_channel = channel or interaction.channel
@@ -38,6 +38,9 @@ class AdminCommands(commands.Cog):
                 cog.target_channel_id = target_channel.id
 
         await interaction.response.send_message(f"已將目標頻道切換至：{target_channel.mention}", ephemeral=True)
+
+    # 2. 查水表 (查看使用者後台數據)
+    @admin_group.command(name="check", description="查看指定使用者的後台詳細數據")
     async def check(self, interaction: discord.Interaction, member: discord.Member):
         data = database.get_user_full_data(member.id)
         if not data:
@@ -110,7 +113,19 @@ class AdminCommands(commands.Cog):
         else:
             await interaction.response.send_message("找不到 WaterReminder 模組。", ephemeral=True)
 
-    # 2. 切換排程開關
+    # 2. 立即觸發每日新聞早報
+    @admin_group.command(name="trigger_news", description="立即執行一次每日新聞早報")
+    async def trigger_news(self, interaction: discord.Interaction):
+        news_cog = self.bot.get_cog("DailyNews")
+        if not news_cog:
+            await interaction.response.send_message("找不到 DailyNews 模組。", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        await news_cog.news_task()
+        await interaction.followup.send("已手動觸發一次新聞早報。", ephemeral=True)
+
+    # 3. 切換排程開關
     @admin_group.command(name="toggle_water", description="開啟或關閉自動喝水提醒排程")
     @app_commands.choices(action=[
         app_commands.Choice(name="啟動排程", value="start"),
@@ -132,7 +147,7 @@ class AdminCommands(commands.Cog):
             water_cog.water_task.cancel()
             await interaction.response.send_message("喝水排程已停止運作。", ephemeral=True)
 
-    # 3. 批次清理頻道訊息 (Purge)
+    # 4. 批次清理頻道訊息 (Purge)
     @admin_group.command(name="clear", description="快速清理頻道內的指定數量訊息")
     @app_commands.describe(amount="要往上刪除幾則訊息？ (預設 5，最多建議 100)")
     async def clear_messages(self, interaction: discord.Interaction, amount: int = 5):

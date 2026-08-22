@@ -10,8 +10,8 @@
 
 - 完整的等級系統與排行榜（30 級稱號進度）
 - 自動化喝水提醒與打卡系統（Combo 機制）
-- 雙模式身分組管理（反應綁定 + 下拉選單）
-- AI 整理的每日新聞早報（Groq Llama 3.3）
+- 下拉選單身分組管理
+- AI 整理的每日新聞早報（Groq API / openai/gpt-oss-120b）
 - 娛樂小遊戲（運勢占卜、解答之書）
 - 完整的管理員控制面板
 
@@ -56,19 +56,7 @@
 | 排行榜查詢 | `/leaderboard` 指令，支援多頁查詢、彩色身分組 |
 | 個人等級查看 | `/rank` 指令，展示詳細的等級與進度資訊 |
 
-### 3. 身分組系統（雙模式）
-
-#### 模式 A：反應綁定 (Reaction Roles)
-
-```
-!roleReact add <訊息ID> <@身分組> <表情符號>
-```
-
-- 管理員綁定訊息上的表情符號與身分組
-- 採取「互斥」邏輯，選擇一個表情自動移除其他
-- 所有綁定規則永久儲存於 SQLite 資料庫
-
-#### 模式 B：下拉選單 UI (Select Menu)
+### 3. 身分組系統（下拉選單 UI）
 
 ```
 /role_ui spawn <標題> <@身分組1> [身分組2~5]
@@ -84,8 +72,10 @@
 
 | 指令 | 功能 |
 |-----|------|
+| `/admin set_channel [頻道]` | 設定喝水提醒／排行榜／新聞早報要發送的目標頻道 |
 | `/admin check <使用者>` | 查詢使用者的 EXP、Combo、最後打卡回合 |
 | `/admin trigger_water` | 立即發送一則喝水通知 |
+| `/admin trigger_news` | 立即執行一次每日新聞早報 |
 | `/admin toggle_water [start\|stop]` | 啟動/停止自動喝水排程 |
 | `/admin backup_db` | 下載資料庫備份（`.db` 格式） |
 | `/admin remove_user <使用者>` | 完全刪除使用者所有遊戲數據（不可復原） |
@@ -100,11 +90,11 @@
 | 功能 | 說明 |
 |-----|------|
 | 自動早報 | 每日早上 8:00 自動發送 Google News 台灣新聞摘要 |
-| AI 整理 | 使用 Groq Llama 3.3 70B 模型撰寫摘要（約 100 字） |
+| AI 整理 | 透過 Groq API 呼叫 `openai/gpt-oss-120b` 模型撰寫摘要（約 100 字） |
 | RSS 爬蟲 | 自動抓取前 3 則台灣新聞 |
 | 網址縮短 | 使用 `is.gd` 服務自動縮短新聞連結 |
 | Webhook 發送 | 動態建立專屬 Webhook 以角色扮演的口吻發送 |
-| 測試模式 | `!test_news` 立即觸發（測試完自動刪除指令） |
+| 立即觸發 | `/admin trigger_news` 立即執行一次（不等排程） |
 
 ### 6. 解答之書
 
@@ -142,7 +132,6 @@ water_bot_project/
 ├── constants.py             # 等級配置、身分組 ID 映射
 ├── database.py              # SQLite 資料庫初始化與管理
 ├── event_manager.py         # 事件系統（Combo 機制相關）
-├── update_db.py             # 資料庫遷移與升級工具
 │
 ├── cogs/                    # Discord.py Cogs（功能模組）
 │   ├── water_reminder.py    # 喝水打卡系統、睡眠統計
@@ -151,7 +140,7 @@ water_bot_project/
 │   ├── answer_book.py       # 解答之書
 │   ├── fortune.py           # 運勢抽籤
 │   ├── daily_news.py        # 每日新聞（AI 整理）
-│   └── reaction_roles.py    # 身分組管理（反應綁定、下拉選單）
+│   └── reaction_roles.py    # 身分組管理（下拉選單）
 │
 ├── water_exp.db             # SQLite 資料庫檔案
 ├── answers.json             # 解答之書的回答資料庫
@@ -247,11 +236,10 @@ ROLE_MAPPING = {
 
 ### 4. 設定通知頻道
 
-編輯 `cogs/water_reminder.py` 和 `cogs/daily_news.py`，設定目標頻道 ID：
+有兩種方式設定喝水提醒／排行榜／新聞早報要發送的頻道：
 
-```python
-target_channel_id = 1234567890  # 替換為你的頻道 ID
-```
+- 在 `.env` 設定 `DEFAULT_CHANNEL_ID=你的頻道ID`（開機時的預設值）
+- 或機器人上線後，在該頻道輸入 `/admin set_channel`（會立即覆蓋並寫入資料庫，不需重啟）
 
 ### 5. 啟動機器人
 
@@ -289,19 +277,14 @@ Bot 已經成功登入為 YourBotName#0000
 /omikuji                 進行每日運勢占卜
 ```
 
-#### 其他
-
-```
-!test_water             測試喝水提醒（發送一則通知）
-```
-
 ### 管理員指令
 
 所有管理員指令使用 `/admin` 前綴（需要伺服器管理者權限）：
 
-#### 查詢與統計
+#### 頻道與查詢
 
 ```
+/admin set_channel [頻道]    設定喝水提醒／排行榜／新聞早報的目標頻道
 /admin check <@使用者>       查詢使用者的完整後台數據
 ```
 
@@ -309,6 +292,7 @@ Bot 已經成功登入為 YourBotName#0000
 
 ```
 /admin trigger_water         立即發送一則喝水通知
+/admin trigger_news          立即執行一次新聞早報
 /admin toggle_water start    啟動自動喝水排程
 /admin toggle_water stop     停止自動喝水排程
 ```
@@ -335,16 +319,6 @@ Bot 已經成功登入為 YourBotName#0000
 ```
 
 例：`/role_ui spawn "選擇你的興趣" @遊戲 @動漫 @音樂`
-
-### 身分組管理
-
-#### 反應綁定（傳統方式）
-
-```
-!roleReact add <訊息ID> <@身分組> <表情符號>
-```
-
-例：`!roleReact add 123456789 @Member` （於指令後方附上要綁定的表情符號反應）
 
 ---
 
@@ -424,11 +398,11 @@ Day 1, 14:00 - 打卡（跳過 3 個回合）→ Combo: 0（重置）
 CREATE TABLE users (
     user_id TEXT PRIMARY KEY,        -- Discord 使用者 ID
     total_exp INTEGER DEFAULT 0,     -- 總經驗值
-    daily_exp INTEGER DEFAULT 0,     -- 今日已獲得 EXP
     combo INTEGER DEFAULT 0,         -- 連續打卡次數
     last_round INTEGER DEFAULT 0,    -- 最後打卡的系統回合數
-    wake_time TEXT,                  -- 起床時間（HH:MM 格式）
-    sleep_time TEXT                  -- 就寢時間（HH:MM 格式）
+    last_claim_date TEXT,            -- 最後打卡的邏輯日期 (YYYY-MM-DD)
+    daily_exp INTEGER DEFAULT 0,     -- 今日已獲得 EXP
+    daily_fortune TEXT DEFAULT ''    -- 今日運勢籤結果 (影響打卡機緣機率)
 )
 ```
 
@@ -442,7 +416,20 @@ CREATE TABLE claims (
 )
 ```
 
-#### `reaction_roles` - 反應綁定規則
+#### `daily_events` - 今日機緣明細
+
+```sql
+CREATE TABLE daily_events (
+    user_id TEXT,                    -- 使用者 ID
+    event_name TEXT,                 -- 事件名稱 (如「基礎修為」、機緣事件名)
+    exp_change INTEGER,              -- 該筆造成的經驗值變動
+    timestamp TEXT                   -- 發生時間 (HH:MM:SS)
+)
+```
+
+供 `/today` 指令展示今日修煉的明細，每日結算後會被清空。
+
+#### `reaction_roles` - （目前尚未串接功能，保留供未來擴充）
 
 ```sql
 CREATE TABLE reaction_roles (
@@ -464,9 +451,11 @@ CREATE TABLE system_state (
 
 **常見 system_state 鍵**：
 
+- `target_channel_id`：喝水提醒／排行榜／新聞早報的目標頻道 ID（由 `/admin set_channel` 設定）
 - `active_water_message`：目前活躍的喝水通知訊息 ID
 - `current_round`：目前系統回合數
-- `last_news_time`：最後發送新聞的時間
+- `consecutive_missed`：連續無人打卡的回合數（用於深夜提早結束判定）
+- `is_sleeping`：是否已進入深夜睡眠模式
 
 ---
 
@@ -537,7 +526,6 @@ ROLE_MAPPING = {
 | `/rank`, `/leaderboard`, `/ask_book`, `/omikuji` | 無 | 所有使用者可用 |
 | `/role_ui spawn` | 伺服器管理者 | 管理員指令 |
 | `/admin *` | 伺服器管理者 | 所有 admin 子指令 |
-| `!roleReact add` | 管理身分組 | 身分組管理員 |
 
 ### 機器人必需權限
 
@@ -547,7 +535,6 @@ ROLE_MAPPING = {
 - 嵌入連結
 - 管理身分組
 - 建立 Webhook
-- 新增反應
 - 管理訊息
 
 ### 敏感操作
@@ -583,9 +570,9 @@ ROLE_MAPPING = {
 #### daily_news.py
 
 - Google News RSS 爬蟲
-- Groq AI 新聞整理
+- 透過 Groq API 呼叫 `openai/gpt-oss-120b` 整理新聞摘要
 - Webhook 動態管理
-- 排程控制
+- 排程控制（可用 `/admin trigger_news` 立即觸發）
 
 #### answer_book.py
 
@@ -600,14 +587,9 @@ ROLE_MAPPING = {
 
 #### reaction_roles.py
 
-- 反應綁定的 on_raw_reaction_add 監聽
-- 下拉選單的 Select 實現
+- 下拉選單的 Select 實現（`/role_ui spawn`）
 - 互斥身分組邏輯
 
 ### 資料庫初始化
 
-首次運行 `python main.py` 時，`database.py` 會自動建立以下表格。若需要遷移舊版本數據，使用 `update_db.py`：
-
-```bash
-python update_db.py
-```
+首次運行 `python main.py` 時，`database.py` 會自動建立所有必要的表格，並在後續版本新增欄位時自動補齊，不需要額外的遷移工具。

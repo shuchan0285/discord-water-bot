@@ -140,7 +140,7 @@ class DailyNews(commands.Cog):
             # 3. 呼叫 Groq API
             ai_url = "https://api.groq.com/openai/v1/chat/completions"
             ai_payload = {
-                "model": "llama-3.3-70b-versatile",
+                "model": "openai/gpt-oss-120b",
                 "messages": [
                     { "role": "system", "content": system_prompt },
                     { "role": "user", "content": user_prompt }
@@ -187,11 +187,6 @@ class DailyNews(commands.Cog):
     @news_task.before_loop
     async def before_task(self):
         await self.bot.wait_until_ready()
-
-    @commands.command()
-    async def test_news(self, ctx):
-        await self.news_task()
-        await ctx.message.delete()
 
 async def setup(bot):
     await bot.add_cog(DailyNews(bot))
