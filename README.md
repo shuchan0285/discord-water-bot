@@ -1,64 +1,177 @@
-# 健康打卡機器人 Health Check-in Bot
+# Water Reminder Bot - 喝水提醒機器人
 
 [![Python 3.8+](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/)
 [![discord.py](https://img.shields.io/badge/discord.py-2.0%2B-blue)](https://discordpy.readthedocs.io/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## 專案介紹 Introduction
-
-「健康打卡機器人」是一款以 **discord.py** 打造的 Discord 伺服器機器人，把「記得喝水」這件日常小事，包裝成一場帶有等級、連擊與稱號的闖關遊戲。機器人會定時發送提醒、記錄打卡與連續天數、依進度自動發放對應身分組，並額外附上每日運勢籤、解答之書、AI 整理的每日新聞早報等娛樂功能，讓健康提醒不再只是煩人的通知，而是能跟朋友一起累積、互相比較的伺服器日常。整體稱號與世界觀設計參考了熱門戰鬥動漫的能力體系，純屬玩梗包裝，與健康提醒的核心功能無關。
-
-Health Check-in Bot is a Discord.py bot that turns a simple daily habit — drinking enough water — into a lightweight, gamified check-in system. It posts scheduled reminders, tracks check-ins and combo streaks, awards level-based titles and roles automatically, and layers on a few extra mini-games (a daily fortune draw, an answer book, and an AI-written morning news digest) so a health reminder feels less like a chore and more like a shared ritual with friends on your server. The level titles borrow flavor from popular battle-anime power systems purely as reskinned naming — it has no effect on the actual reminder logic.
+一個基於 **Discord.py** 開發的喝水提醒機器人，以動漫風格的世界觀作為介面包裝，透過遊戲化機制鼓勵使用者養成健康的飲水習慣。
 
 **核心特色**
 
-- 定時健康打卡提醒，搭配連擊（Combo）機制與隨機額外獎勵
-- 30 級稱號進度系統，升級自動切換對應身分組
-- 下拉選單身分組面板，支援互斥選擇與一鍵卸下
-- AI 整理的每日新聞早報（Groq API）
-- 娛樂小遊戲：每日運勢籤、解答之書
-- 完整的管理員控制面板（頻道設定、數值調整、身分組批次建立等）
+- 完整的等級系統與排行榜（30 級稱號進度）
+- 自動化喝水提醒與打卡系統（Combo 機制）
+- 下拉選單身分組管理
+- AI 整理的每日新聞早報（Groq API / openai/gpt-oss-120b）
+- 娛樂小遊戲（運勢占卜、解答之書）
+- 完整的管理員控制面板
 
 ---
 
 ## 目錄
 
-- [環境需求](#環境需求)
-- [安裝方式](#安裝方式)
-- [環境變數設定](#環境變數設定)
-- [設定身分組](#設定身分組)
-- [啟動機器人](#啟動機器人)
-- [指令總覽](#指令總覽)
-- [遊戲機制](#遊戲機制)
-- [資料儲存](#資料儲存)
+- [功能概覽](#功能概覽)
 - [專案結構](#專案結構)
+- [快速開始](#快速開始)
+- [使用指令](#使用指令)
+- [遊戲機制詳解](#遊戲機制詳解)
+- [資料庫結構](#資料庫結構)
+- [配置說明](#配置說明)
 - [安全與權限](#安全與權限)
-- [疑難排解](#疑難排解)
 
 ---
 
-## 環境需求
+## 功能概覽
 
-- Python 3.8 以上（建議 3.10+）
-- pip 套件管理工具
-- Discord 伺服器的管理員權限（用於邀請與測試機器人）
-- Discord Bot Token（於 [Discord Developer Portal](https://discord.com/developers/applications) 建立應用程式取得）
-- Groq API Key（選用，僅新聞早報功能需要）
+### 1. 喝水打卡系統
 
-確認環境：
+自動定時發送喝水提醒，鼓勵使用者養成飲水習慣。
 
-```bash
-python --version
-pip --version
+| 功能 | 說明 |
+|-----|------|
+| 定時提醒 | 每天 10:00～23:30，每 30 分鐘發送一次提醒 |
+| 互動式打卡 | 使用者點擊按鈕完成打卡，防止重複領取獎勵 |
+| Combo 機制 | 連續打卡觸發 Combo，每 5 Combo 額外獎勵 +5 EXP |
+| 自動身分組 | 首次打卡自動獲得 Lv.1 身分組，升級自動更換 |
+| 睡眠統計 | 提供「睡前報告」功能，展示一日修行成果 |
+
+### 2. 等級與排行榜
+
+30 階段的等級系統，每個等級對應獨特稱號與顏色，靈感取材自動漫的世界觀設定。
+
+| 功能 | 說明 |
+|-----|------|
+| 30 級系統 | 從初階稱號到最高階稱號的完整進度 |
+| 經驗值機制 | 公式：`EXP = 15 × 等級² + 50 × 等級 + 50`，需累積足夠 EXP 逐級晉升 |
+| 進度條展示 | 使用區塊字符（■□）視覺化展示升級進度 |
+| 排行榜查詢 | `/leaderboard` 指令，支援多頁查詢、彩色身分組 |
+| 個人等級查看 | `/rank` 指令，展示詳細的等級與進度資訊 |
+
+### 3. 身分組系統（下拉選單 UI）
+
+```
+/role_ui spawn <標題> <@身分組1> [身分組2~5]
+```
+
+- 管理員建立下拉選單身分組面板
+- 支援 1～5 個選項，靈活配置
+- 互斥邏輯，使用者可清空選單卸下身分組
+
+### 4. 管理員控制面板
+
+完整的伺服器管理工具，支援數據查詢、系統控制、身分組管理。
+
+| 指令 | 功能 |
+|-----|------|
+| `/admin set_channel [頻道]` | 設定喝水提醒／排行榜／新聞早報要發送的目標頻道 |
+| `/admin check <使用者>` | 查詢使用者的 EXP、Combo、最後打卡回合 |
+| `/admin trigger_water` | 立即發送一則喝水通知 |
+| `/admin trigger_news` | 立即執行一次每日新聞早報 |
+| `/admin toggle_water [start\|stop]` | 啟動/停止自動喝水排程 |
+| `/admin backup_db` | 下載資料庫備份（`.db` 格式） |
+| `/admin remove_user <使用者>` | 完全刪除使用者所有遊戲數據（不可復原） |
+| `/admin create_roles` | 自動建立 30 個身分組並產生 `ROLE_MAPPING` 程式碼 |
+| `/admin generate_mapping` | 掃描現有身分組，自動產生 `ROLE_MAPPING` 配置 |
+| `/admin test_welcome` | 測試新伺服器歡迎訊息 |
+
+### 5. 每日新聞模組
+
+使用 AI 自動整理新聞，每日早上 8:00（台灣時間）發送一次摘要。
+
+| 功能 | 說明 |
+|-----|------|
+| 自動早報 | 每日早上 8:00 自動發送 Google News 台灣新聞摘要 |
+| AI 整理 | 透過 Groq API 呼叫 `openai/gpt-oss-120b` 模型撰寫摘要（約 100 字） |
+| RSS 爬蟲 | 自動抓取前 3 則台灣新聞 |
+| 網址縮短 | 使用 `is.gd` 服務自動縮短新聞連結 |
+| Webhook 發送 | 動態建立專屬 Webhook 以角色扮演的口吻發送 |
+| 立即觸發 | `/admin trigger_news` 立即執行一次（不等排程） |
+
+### 6. 解答之書
+
+從語庫中隨機抽取回應，提供類似占卜小遊戲的互動體驗。
+
+| 功能 | 說明 |
+|-----|------|
+| 互動式抽籤 | `/ask_book [問題]` 指令隨機抽取回答 |
+| 雙語支援 | 內建繁體中文與英文回答 |
+| 情感分析 | 根據標籤調整回答語氣（wisdom、humor、ominous 等） |
+| 過場動畫 | 翻書與思考的互動式視覺效果 |
+| 彈性提問 | 支援有具體問題或在心中默念兩種模式 |
+| 易於擴充 | JSON 格式儲存，輕鬆新增回答 |
+
+### 7. 幸運抽籤
+
+提供每日運勢占卜的娛樂功能。
+
+| 功能 | 說明 |
+|-----|------|
+| 運勢占卜 | `/omikuji` 指令進行每日運勢抽籤 |
+| 多個等級 | 大吉、吉、小吉、末吉、末小吉、凶 |
+| 角色互動 | 以詼諧風趣的語調引導抽籤過程 |
+| 重抽機制 | 抽到凶籤時可點擊「重抽」按鈕（限時 10 分鐘） |
+| 彩色展示 | 根據運勢等級自動調整訊息顏色 |
+| 個人化建議 | 針對愛情、財運、學業、工作提供運勢詳解 |
+
+---
+
+## 專案結構
+
+```
+water_bot_project/
+├── main.py                  # Bot 主程式進入點
+├── constants.py             # 等級配置、身分組 ID 映射
+├── database.py              # SQLite 資料庫初始化與管理
+├── event_manager.py         # 事件系統（Combo 機制相關）
+│
+├── cogs/                    # Discord.py Cogs（功能模組）
+│   ├── water_reminder.py    # 喝水打卡系統、睡眠統計
+│   ├── level_system.py      # 等級、排行榜系統
+│   ├── admin.py             # 管理員控制面板
+│   ├── answer_book.py       # 解答之書
+│   ├── fortune.py           # 運勢抽籤
+│   ├── daily_news.py        # 每日新聞（AI 整理）
+│   └── reaction_roles.py    # 身分組管理（下拉選單）
+│
+├── water_exp.db             # SQLite 資料庫檔案
+├── answers.json             # 解答之書的回答資料庫
+├── fortune.json             # 運勢抽籤的結果資料庫
+├── events.json              # 事件配置檔
+├── water_messages.json      # 喝水提醒訊息範本
+│
+├── .env                     # Discord Token（需自行創建）
+├── groq.env                 # Groq API Key（需自行創建）
+├── .gitignore               # Git 忽略清單
+└── README.md                # 本檔案
 ```
 
 ---
 
-## 安裝方式
+## 快速開始
+
+### 前置條件
+
+- Python 3.8+（推薦 3.10 或更新）
+- pip 套件管理工具
+- Discord 伺服器管理員權限（用於測試機器人）
+- Discord Bot Token（從 [Discord Developer Portal](https://discord.com/developers/applications) 獲取）
+- Groq API Key（可選，用於 AI 新聞功能）
+
+### 1. 複製與環境設定
 
 ```bash
 # 複製專案
 git clone <repository_url>
-cd discord-water-bot
+cd water_bot_project
 
 # 建立虛擬環境（建議）
 python -m venv venv
@@ -69,72 +182,72 @@ venv\Scripts\activate          # Windows
 pip install -r requirements.txt
 ```
 
-`requirements.txt` 內容：`discord.py`、`python-dotenv`、`aiohttp`、`beautifulsoup4`。
+### 2. 配置環境變數
 
----
+在專案根目錄建立 `.env` 檔案：
 
-## 環境變數設定
+```env
+DISCORD_TOKEN=your_bot_token_here
+```
 
-專案不會將任何金鑰寫死在程式碼中，需要自行建立以下兩個檔案（皆已列入 `.gitignore`）。
+（可選）如需使用新聞功能，建立 `groq.env` 檔案：
 
-`.env`（必要）：
+```env
+GROQ_API_KEY=your_groq_api_key
+```
 
-| 變數 | 說明 |
-| --- | --- |
-| `DISCORD_TOKEN` | Discord Bot Token |
-| `DEFAULT_CHANNEL_ID` | 開機時預設的訊息發送頻道 ID（可用 `/admin set_channel` 覆蓋） |
+重要：確保 `.env` 和 `groq.env` 已加入 `.gitignore`，防止金鑰外洩。
 
-`groq.env`（選用，僅新聞早報功能需要）：
+### 3. 設定身分組 ID
 
-| 變數 | 說明 |
-| --- | --- |
-| `GROQ_API_KEY` | Groq API 金鑰，用於呼叫 `openai/gpt-oss-120b` 模型整理新聞摘要 |
+有三種方式設定身分組：
 
-重要：務必確認 `.env` 與 `groq.env` 沒有被提交到版本控制，避免金鑰外洩。
+#### 方式 A：自動建立（推薦）
 
----
-
-## 設定身分組
-
-等級對應的 30 個身分組需要在你自己的伺服器中建立，`constants.py` 中的 `ROLE_MAPPING` 才能對上正確的身分組 ID。三種方式擇一：
-
-### 方式 A：自動建立（推薦）
+機器人會自動建立 30 個身分組：
 
 ```
 /admin create_roles
 ```
 
-機器人會依 `TITLE_DATA` 自動建立 30 個身分組，並回傳一份 `role_mapping.py`，將內容複製回 `constants.py` 的 `ROLE_MAPPING` 即可。
+機器人會下載 `role_mapping.py` 檔案，複製內容到 `constants.py` 中的 `ROLE_MAPPING`。
 
-### 方式 B：自動掃描既有身分組
+#### 方式 B：自動掃描（現有身分組）
+
+如果伺服器已有身分組，讓機器人自動掃描匹配：
 
 ```
 /admin generate_mapping
 ```
 
-依稱號名稱在伺服器現有身分組中比對，產生對應的 `role_mapping.py`；找不到的稱號會標記為 `None`。
+機器人會按稱號名稱自動匹配身分組 ID，並提供 `role_mapping.py` 下載。
 
-### 方式 C：手動編輯
+#### 方式 C：手動編輯
 
-直接修改 `constants.py` 的 `ROLE_MAPPING`：
+編輯 `constants.py` 中的 `ROLE_MAPPING` 字典，將每個等級的虛擬 ID 替換為實際身分組 ID：
 
 ```python
 ROLE_MAPPING = {
     1: 1234567890,
     2: 1234567891,
-    # ... 以此類推到 30
+    # ... 以此類推
 }
 ```
 
----
+### 4. 設定通知頻道
 
-## 啟動機器人
+有兩種方式設定喝水提醒／排行榜／新聞早報要發送的頻道：
+
+- 在 `.env` 設定 `DEFAULT_CHANNEL_ID=你的頻道ID`（開機時的預設值）
+- 或機器人上線後，在該頻道輸入 `/admin set_channel`（會立即覆蓋並寫入資料庫，不需重啟）
+
+### 5. 啟動機器人
 
 ```bash
 python main.py
 ```
 
-看到以下輸出即代表啟動成功：
+如果看到以下輸出，表示機器人已成功啟動：
 
 ```
 資料庫初始化完成
@@ -144,175 +257,339 @@ python main.py
 Bot 已經成功登入為 YourBotName#0000
 ```
 
-機器人首次加入新伺服器時，會在系統頻道（或第一個有發言權限的文字頻道）自動發送一則角色扮演口吻的自我介紹訊息，內容可用 `/admin test_welcome` 重新觸發預覽。
-
 ---
 
-## 指令總覽
+## 使用指令
 
-### 一般使用者指令
+### 使用者指令
 
-| 指令 | 說明 |
-| --- | --- |
-| `/rank` | 查看個人健康打卡等級與經驗值進度 |
-| `/leaderboard [page]` | 查看伺服器排行榜，支援分頁 |
-| `/today` | 查看今日打卡總結與機緣明細 |
-| `/ask_book [question]` | 從解答之書隨機抽取一則回覆 |
-| `/omikuji` | 抽取今日運勢籤 |
-| `/role_ui spawn <標題> <身分組1> [身分組2~5]` | 建立身分組領取下拉選單（需管理身分組權限） |
-
-### 管理員指令（`/admin`，需伺服器管理員權限）
-
-| 指令 | 說明 |
-| --- | --- |
-| `/admin set_channel [channel]` | 設定提醒／排行榜／新聞早報的目標頻道 |
-| `/admin check <member>` | 查詢使用者的等級、經驗值、連擊等後台數據 |
-| `/admin add_exp <member> <amount>` | 增加或扣除（負數）使用者經驗值 |
-| `/admin set_exp <member> <amount>` | 強制設定使用者的最終經驗值 |
-| `/admin reset <member>` | 將使用者經驗值、連擊、回合數歸零（保留打卡紀錄） |
-| `/admin reset_daily <member>` | 清空使用者今日打卡狀態，可重新觸發今日首抽 |
-| `/admin sync_level <member>` | 依目前經驗值重新校準身分組 |
-| `/admin remove_user <member>` | 徹底刪除使用者所有資料（不可復原） |
-| `/admin backup_db` | 下載目前資料庫檔案備份 |
-| `/admin trigger_water` | 立即手動發送一則打卡通知 |
-| `/admin toggle_water <start\|stop>` | 啟動或停止自動提醒排程 |
-| `/admin trigger_news` | 立即執行一次新聞早報 |
-| `/admin clear [amount]` | 清理目前頻道內指定數量的訊息 |
-| `/admin create_roles` | 批次建立 30 個等級身分組並產生 Mapping |
-| `/admin generate_mapping` | 掃描既有身分組並產生 Mapping |
-| `/admin test_welcome` | 重新觸發加入伺服器時的歡迎訊息 |
-
----
-
-## 遊戲機制
-
-### 打卡提醒排程
-
-- 台灣時間每天 10:00 到隔日 02:00，每 30 分鐘發送一則提醒（按鈕互動打卡，防止重複領取）
-- 凌晨 00:00～04:00 之間，若連續多回合無人打卡（02:00 後累積 3 回合，或任何時段累積 5 回合），會提前結算並進入睡眠模式，直到隔日 10:00 自動恢復
-- 睡眠模式期間會出現「我要睡覺了」按鈕，供使用者查看個人今日總結
-
-### 經驗值與連擊（Combo）
-
-- 每次打卡基礎 +10 EXP，並有機率觸發隨機機緣事件（受當日運勢籤影響機率）
-- 連續打卡累積 Combo，每達到 5 的倍數額外 +5 EXP；若打卡中斷（跳過回合）則 Combo 歸零重算
-- 升級所需經驗值：`EXP = 15 × 等級² + 50 × 等級 + 50`
-- 共 30 個等級，各自對應獨特稱號與身分組顏色（`constants.py` 中的 `TITLE_DATA`）
-
-### 每日結算
-
-- 台灣時間每天 04:00 自動發送排行榜總結（含今日進步最快玩家），並重置每日經驗值統計
-- 若當晚提早進入睡眠模式，會直接觸發當次結算，不等到 04:00
-
-### 每日新聞早報
-
-- 台灣時間每天 08:00 自動抓取 Google 新聞（台灣）前 3 則
-- 透過 Groq API 呼叫 `openai/gpt-oss-120b` 模型，以固定人設語氣整理成約 100 字摘要
-- 使用 `is.gd` 縮短新聞連結，並透過動態建立的 Webhook 發送
-- 可用 `/admin trigger_news` 立即觸發一次，不需等待排程
-
----
-
-## 資料儲存
-
-資料庫為單一 SQLite 檔案 `water_exp.db`，首次執行 `python main.py` 時由 `database.py` 自動建立所有表格；日後新增欄位也會自動補上，不需額外的遷移工具。
-
-| 資料表 | 用途 |
-| --- | --- |
-| `users` | 使用者的總經驗值、Combo、最後打卡回合／日期、今日經驗、今日運勢籤 |
-| `claims` | 打卡防重複領取紀錄（每則提醒訊息 + 使用者僅能領取一次） |
-| `daily_events` | 今日經驗值變動明細（供 `/today` 顯示，每日結算後清空） |
-| `system_state` | 系統狀態鍵值（目標頻道、目前回合數、連續未打卡次數、是否進入睡眠模式等） |
-| `reaction_roles` | 保留欄位，目前尚未串接任何功能 |
-
-其他資料檔案（JSON，可直接編輯擴充）：
-
-| 檔案 | 用途 |
-| --- | --- |
-| `water_messages.json` | 打卡提醒的隨機文字範本 |
-| `fortune.json` | 每日運勢籤的籤詩與解籤內容 |
-| `answers.json` | 解答之書的中英雙語回答庫 |
-| `events.json` | 打卡時觸發的隨機機緣事件與權重設定 |
-
----
-
-## 專案結構
+#### 等級與排名
 
 ```
-discord-water-bot/
-├── main.py                  # Bot 主程式進入點
-├── constants.py              # 等級稱號、身分組 ID 對照表
-├── database.py               # SQLite 初始化與所有資料庫操作
-├── event_manager.py          # 打卡隨機機緣事件抽取邏輯
-│
-├── cogs/                     # Discord.py 功能模組
-│   ├── water_reminder.py     # 打卡提醒排程、睡眠模式、按鈕互動
-│   ├── level_system.py       # 等級查詢、排行榜、每日結算
-│   ├── admin.py               # 管理員控制面板
-│   ├── answer_book.py         # 解答之書
-│   ├── fortune.py             # 每日運勢籤
-│   ├── daily_news.py          # AI 新聞早報
-│   └── reaction_roles.py      # 身分組下拉選單
-│
-├── water_exp.db               # SQLite 資料庫（需自行產生，已列入 .gitignore）
-├── water_messages.json        # 打卡提醒文字範本
-├── fortune.json                # 運勢籤資料
-├── answers.json                 # 解答之書資料
-├── events.json                  # 隨機機緣事件設定
-│
-├── .env                        # Discord Token（需自行建立）
-├── groq.env                    # Groq API Key（需自行建立）
-├── requirements.txt
-├── .gitignore
-└── README.md
+/rank                    查看個人喝水等級與經驗值進度
+/leaderboard [page]      查看全伺服器排行榜（支援多頁）
 ```
+
+#### 娛樂功能
+
+```
+/ask_book [問題]         從解答之書中隨機抽取回覆
+/omikuji                 進行每日運勢占卜
+```
+
+### 管理員指令
+
+所有管理員指令使用 `/admin` 前綴（需要伺服器管理者權限）：
+
+#### 頻道與查詢
+
+```
+/admin set_channel [頻道]    設定喝水提醒／排行榜／新聞早報的目標頻道
+/admin check <@使用者>       查詢使用者的完整後台數據
+```
+
+#### 系統控制
+
+```
+/admin trigger_water         立即發送一則喝水通知
+/admin trigger_news          立即執行一次新聞早報
+/admin toggle_water start    啟動自動喝水排程
+/admin toggle_water stop     停止自動喝水排程
+```
+
+#### 資料管理
+
+```
+/admin backup_db             下載資料庫備份
+/admin remove_user <@使用者> 刪除使用者所有遊戲數據（不可復原）
+```
+
+#### 身分組設定
+
+```
+/admin create_roles          自動建立 30 個身分組
+/admin generate_mapping      從現有身分組掃描產生 ROLE_MAPPING
+/admin test_welcome          測試新伺服器歡迎訊息
+```
+
+#### 下拉選單（身分組面板）
+
+```
+/role_ui spawn <標題> <@身分組1> [身分組2~5]
+```
+
+例：`/role_ui spawn "選擇你的興趣" @遊戲 @動漫 @音樂`
+
+---
+
+## 遊戲機制詳解
+
+### 經驗值系統
+
+**打卡獎勵**：
+
+- 基礎獎勵：每次打卡 10 EXP
+- Combo 獎勵：每 5 Combo 額外 +5 EXP（共 15 EXP）
+
+**升級公式**：
+
+```
+當前等級所需 EXP = 15 × 當前等級² + 50 × 當前等級 + 50
+```
+
+### Combo 機制
+
+**延續條件**：
+
+- 系統每 30 分鐘（10:00～23:30）發送一個「回合」
+- 若使用者在該回合內打卡，Combo +1
+- 若下次打卡的回合是上次回合 + 1，Combo 繼續累計
+- 否則 Combo 歸零，重新開始
+
+**獎勵觸發**：
+
+- Combo x5：額外 +5 EXP
+- Combo x10：額外 +5 EXP
+- Combo x15、x20、依此類推
+
+**範例**：
+
+```
+Day 1, 10:00 - 打卡 → Combo: 1
+Day 1, 10:30 - 打卡 → Combo: 2
+Day 1, 11:00 - 打卡 → Combo: 3
+Day 1, 11:30 - 打卡 → Combo: 4
+Day 1, 12:00 - 打卡 → Combo: 5（+5 EXP 獎勵）
+Day 1, 14:00 - 打卡（跳過 3 個回合）→ Combo: 0（重置）
+```
+
+### 身分組同步
+
+**首次打卡**：
+
+- 自動獲得 Lv.1 身分組
+
+**升級時**：
+
+- 自動移除舊身分組
+- 自動新增新身分組
+- 身分組顏色與等級對應，視覺化展示進度
+
+### 每日回合機制
+
+| 時間 | 回合 |
+|-----|------|
+| 10:00 | 第 1 回合 |
+| 10:30 | 第 2 回合 |
+| 11:00 | 第 3 回合 |
+| ... | ... |
+| 23:30 | 第 28 回合 |
+| 23:30 後 | 無回合（Combo 重置） |
+
+---
+
+## 資料庫結構
+
+### 表格設計
+
+#### `users` - 使用者遊戲數據
+
+```sql
+CREATE TABLE users (
+    user_id TEXT PRIMARY KEY,        -- Discord 使用者 ID
+    total_exp INTEGER DEFAULT 0,     -- 總經驗值
+    combo INTEGER DEFAULT 0,         -- 連續打卡次數
+    last_round INTEGER DEFAULT 0,    -- 最後打卡的系統回合數
+    last_claim_date TEXT,            -- 最後打卡的邏輯日期 (YYYY-MM-DD)
+    daily_exp INTEGER DEFAULT 0,     -- 今日已獲得 EXP
+    daily_fortune TEXT DEFAULT ''    -- 今日運勢籤結果 (影響打卡機緣機率)
+)
+```
+
+#### `claims` - 打卡防重複紀錄
+
+```sql
+CREATE TABLE claims (
+    message_id TEXT,                 -- 喝水通知訊息 ID
+    user_id TEXT,                    -- 打卡使用者 ID
+    PRIMARY KEY(message_id, user_id)
+)
+```
+
+#### `daily_events` - 今日機緣明細
+
+```sql
+CREATE TABLE daily_events (
+    user_id TEXT,                    -- 使用者 ID
+    event_name TEXT,                 -- 事件名稱 (如「基礎修為」、機緣事件名)
+    exp_change INTEGER,              -- 該筆造成的經驗值變動
+    timestamp TEXT                   -- 發生時間 (HH:MM:SS)
+)
+```
+
+供 `/today` 指令展示今日修煉的明細，每日結算後會被清空。
+
+#### `reaction_roles` - （目前尚未串接功能，保留供未來擴充）
+
+```sql
+CREATE TABLE reaction_roles (
+    message_id TEXT,                 -- 訊息 ID
+    emoji TEXT,                      -- 表情符號
+    role_id TEXT,                    -- 身分組 ID
+    PRIMARY KEY(message_id, emoji)
+)
+```
+
+#### `system_state` - 系統狀態變數
+
+```sql
+CREATE TABLE system_state (
+    key TEXT PRIMARY KEY,            -- 狀態鍵
+    value TEXT                       -- 狀態值
+)
+```
+
+**常見 system_state 鍵**：
+
+- `target_channel_id`：喝水提醒／排行榜／新聞早報的目標頻道 ID（由 `/admin set_channel` 設定）
+- `active_water_message`：目前活躍的喝水通知訊息 ID
+- `current_round`：目前系統回合數
+- `consecutive_missed`：連續無人打卡的回合數（用於深夜提早結束判定）
+- `is_sleeping`：是否已進入深夜睡眠模式
+
+---
+
+## 配置說明
+
+### constants.py
+
+#### TITLE_DATA
+
+定義每個等級的稱號與顏色：
+
+```python
+TITLE_DATA = {
+    1: {"title": "...", "color": "#bdc3c7"},
+    2: {"title": "...", "color": "#ecf0f1"},
+    # ...
+    30: {"title": "...", "color": "#1b2631"}
+}
+```
+
+#### ROLE_MAPPING
+
+映射等級到 Discord 身分組 ID：
+
+```python
+ROLE_MAPPING = {
+    1: 1234567890,  # Lv.1 身分組 ID
+    2: 1234567891,  # Lv.2 身分組 ID
+    # ... 以此類推到 30
+}
+```
+
+### 其他配置檔案
+
+#### `water_messages.json`
+
+喝水提醒訊息的範本集合。
+
+#### `answers.json`
+
+解答之書的回答資料庫（JSON 格式）。
+
+#### `fortune.json`
+
+運勢占卜的結果資料庫（JSON 格式）。
+
+#### `events.json`
+
+系統事件配置（如打卡機緣事件的機率與經驗值）。
 
 ---
 
 ## 安全與權限
 
-### 金鑰管理
+### Token 與 API Key 管理
 
-- 不在程式碼中硬編碼 Token 或 API Key，一律透過 `.env` / `groq.env` 讀取
-- `.env`、`groq.env`、`*.db` 皆已列入 `.gitignore`，請勿手動強制加入版本控制
-- 若 Token 或金鑰不慎外洩，請立即在 Discord Developer Portal / Groq 後台重新產生
+**最佳實踐**：
 
-### 指令權限
+- 不要在代碼中硬編碼 Token 或 API Key
+- 使用 `.env` 檔案隱藏敏感資訊
+- 確保 `.env` 和 `groq.env` 在 `.gitignore` 中
+- 定期更換 Token（如果外洩）
 
-| 指令範圍 | 所需權限 |
-| --- | --- |
-| `/rank`、`/leaderboard`、`/today`、`/ask_book`、`/omikuji` | 無，所有使用者可用 |
-| `/role_ui spawn` | 管理身分組 |
-| `/admin *` | 伺服器管理員 |
+### Discord 指令權限
 
-### 機器人所需 Discord 權限
+| 指令 | 所需權限 | 說明 |
+|-----|--------|------|
+| `/rank`, `/leaderboard`, `/ask_book`, `/omikuji` | 無 | 所有使用者可用 |
+| `/role_ui spawn` | 伺服器管理者 | 管理員指令 |
+| `/admin *` | 伺服器管理者 | 所有 admin 子指令 |
 
-傳送訊息、嵌入連結、管理身分組、建立 Webhook、管理訊息。
+### 機器人必需權限
 
-### 高風險操作
+請確保機器人在伺服器中擁有以下權限：
 
-`/admin remove_user`（不可復原地刪除使用者資料）與 `/admin backup_db`（匯出完整資料庫，含所有使用者數據）僅限管理員使用，請自行評估是否需要進一步限縮權限。
+- 傳送訊息
+- 嵌入連結
+- 管理身分組
+- 建立 Webhook
+- 管理訊息
 
----
+### 敏感操作
 
-## 疑難排解
+| 操作 | 說明 |
+|-----|------|
+| `/admin remove_user` | 刪除使用者所有遊戲數據，無法復原 |
+| `/admin backup_db` | 下載資料庫備份，包含所有使用者數據 |
+| `ROLE_MAPPING` 設定 | 錯誤設定會導致身分組無法正確發放 |
 
-### 機器人啟動後沒有任何反應 / 斜線指令沒有出現
+### Cogs 模組說明
 
-確認 `.env` 中的 `DISCORD_TOKEN` 正確，且啟動時終端機有印出「斜線指令同步完成」。斜線指令在 Discord 用戶端可能需要數分鐘才會完全同步，或嘗試重新整理 Discord 用戶端。
+#### water_reminder.py
 
-### 提醒訊息、排行榜或新聞早報沒有發送到預期頻道
+- 喝水打卡系統的核心
+- 每 30 分鐘自動發送提醒（10:00～23:30）
+- 管理 Combo 機制與打卡防重複邏輯
+- 提供睡眠統計功能
 
-檢查是否已設定 `DEFAULT_CHANNEL_ID`，或在目標頻道執行過 `/admin set_channel`；資料庫中的設定會覆蓋 `.env` 預設值。
+#### level_system.py
 
-### 新聞早報沒有反應
+- 經驗值與等級計算
+- `/rank` 命令實現
+- `/leaderboard` 排行榜展示
+- 身分組自動同步
 
-確認 `groq.env` 內的 `GROQ_API_KEY` 是否存在且有效；沒有設定時新聞模組會在終端機印出提示並跳過該次排程，可用 `/admin trigger_news` 手動測試。
+#### admin.py
 
-### 身分組沒有正確發放
+- 所有 `/admin` 指令實現
+- 身分組自動建立與掃描
+- 資料庫備份功能
 
-確認已透過 `/admin create_roles` 或 `/admin generate_mapping` 產生正確的 `ROLE_MAPPING`，並確認機器人的身分組位置高於欲發放的目標身分組。可用 `/admin sync_level` 對單一使用者重新校準。
+#### daily_news.py
 
-### 想清空測試資料重新開始
+- Google News RSS 爬蟲
+- 透過 Groq API 呼叫 `openai/gpt-oss-120b` 整理新聞摘要
+- Webhook 動態管理
+- 排程控制（可用 `/admin trigger_news` 立即觸發）
 
-刪除本機的 `water_exp.db` 後重新啟動機器人，會依 `database.py` 的邏輯重新建立乾淨的資料表。
+#### answer_book.py
+
+- 解答之書的隨機選取邏輯
+- JSON 資料庫讀取
+- 過場動畫實現
+
+#### fortune.py
+
+- 運勢占卜系統
+- 重抽機制與冷卻控制
+
+#### reaction_roles.py
+
+- 下拉選單的 Select 實現（`/role_ui spawn`）
+- 互斥身分組邏輯
+
+### 資料庫初始化
+
+首次運行 `python main.py` 時，`database.py` 會自動建立所有必要的表格，並在後續版本新增欄位時自動補齊，不需要額外的遷移工具。
