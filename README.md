@@ -1,9 +1,5 @@
 # Water Reminder Bot - 喝水提醒機器人
 
-[![Python 3.8+](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/)
-[![discord.py](https://img.shields.io/badge/discord.py-2.0%2B-blue)](https://discordpy.readthedocs.io/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
 一個基於 **Discord.py** 開發的喝水提醒機器人，以動漫風格的世界觀作為介面包裝，透過遊戲化機制鼓勵使用者養成健康的飲水習慣。
 
 **核心特色**
