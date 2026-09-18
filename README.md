@@ -7,8 +7,6 @@
 
 「健康打卡機器人」是一款以 **discord.py** 打造的 Discord 伺服器機器人，把「記得喝水」這件日常小事，包裝成一場帶有等級、連擊與稱號的闖關遊戲。機器人會定時發送提醒、記錄打卡與連續天數、依進度自動發放對應身分組，並額外附上每日運勢籤、解答之書、AI 整理的每日新聞早報等娛樂功能，讓健康提醒不再只是煩人的通知，而是能跟朋友一起累積、互相比較的伺服器日常。整體稱號與世界觀設計參考了熱門戰鬥動漫的能力體系，純屬玩梗包裝，與健康提醒的核心功能無關。
 
-Health Check-in Bot is a Discord.py bot that turns a simple daily habit — drinking enough water — into a lightweight, gamified check-in system. It posts scheduled reminders, tracks check-ins and combo streaks, awards level-based titles and roles automatically, and layers on a few extra mini-games (a daily fortune draw, an answer book, and an AI-written morning news digest) so a health reminder feels less like a chore and more like a shared ritual with friends on your server. The level titles borrow flavor from popular battle-anime power systems purely as reskinned naming — it has no effect on the actual reminder logic.
-
 **核心特色**
 
 - 定時健康打卡提醒，搭配連擊（Combo）機制與隨機額外獎勵
